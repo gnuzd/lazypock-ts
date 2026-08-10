@@ -274,11 +274,24 @@ export class LazypockClient {
 				this.authStore.setCollectionName(collection);
 				this.authStore.set(data.token, data.record as unknown as AuthModel);
 			}
-		} else {
-			data = await this.http.post<{ token: string } & Record<string, unknown>>(
-				"/superusers/login",
-				{ email, password },
-			);
+	} else {
+			// Superuser login — PocketBase parity: `_superusers` is an auth collection.
+			// Falls back to the legacy /superusers/login for older servers.
+			try {
+				data = await this.http.post<
+					{ token: string; record: ApiRecord } & Record<string, unknown>
+				>("/_superusers/auth-with-password", {
+					identity: email,
+					password,
+				});
+			} catch {
+				data = null;
+			}
+			if (!data) {
+				data = await this.http.post<
+					{ token: string } & Record<string, unknown>
+				>("/superusers/login", { email, password });
+			}
 			if (data) {
 				this.authStore.setCollectionName(null);
 				this.authStore.set(data.token, null);
@@ -287,9 +300,13 @@ export class LazypockClient {
 		return data;
 	}
 
-	/** Fetch the current superuser profile and refresh the auth model. */
+	/**
+	 * Fetch the current authenticated identity (superuser OR auth collection user).
+	 * Uses `GET /api/me` (PocketBase parity) — works with both superuser tokens
+	 * and auth collection user tokens.
+	 */
 	async me<T = ApiRecord>(options?: RequestOptions): Promise<T | null> {
-		const data = await this.http.get<T>("/superusers/me", options);
+		const data = await this.http.get<T>("/me", options);
 		if (data) {
 			// Update the auth model with fresh data
 			this.authStore.set(this.authStore.token, data as unknown as AuthModel);
