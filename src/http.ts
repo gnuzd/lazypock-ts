@@ -3,6 +3,8 @@
 
 import { ApiError, type Method, type RequestOptions } from "./types";
 import type { AuthStore } from "./auth";
+import type { CacheStore } from "./cache";
+import { resolveCacheDirective } from "./cache";
 
 /**
  * Low-level HTTP client wrapping `fetch` with automatic auth token injection.
@@ -20,6 +22,10 @@ export class HttpClient {
 	private baseUrl: string;
 	private authStore: AuthStore;
 	private defaultFetch: typeof globalThis.fetch;
+	/** Optional query cache store (wired when the client enables caching). */
+	private cache?: CacheStore;
+	/** Master switch resolved from CacheConfig.enabled. */
+	private cacheEnabled = false;
 
 	/**
 	 * Abort controllers for in-flight requests, keyed by their cancellation key
@@ -39,6 +45,20 @@ export class HttpClient {
 		this.baseUrl = baseUrl.replace(/\/+$/, "");
 		this.authStore = authStore;
 		this.defaultFetch = globalThis.fetch.bind(globalThis);
+	}
+
+	/**
+	 * Attach a cache store + master switch.
+	 * Called by the client constructor when cache config is present.
+	 */
+	setCache(cache: CacheStore, enabled: boolean): void {
+		this.cache = cache;
+		this.cacheEnabled = enabled;
+	}
+
+	/** Whether the global cache flag is on (requests opt in/out individually too). */
+	get cacheIsEnabled(): boolean {
+		return this.cacheEnabled;
 	}
 
 	private async refreshAuth(): Promise<{
@@ -125,6 +145,16 @@ export class HttpClient {
 	 * @throws {ApiError} On non-2xx responses or when the request is aborted
 	 * (aborted requests throw an `ApiError` with `isAbort === true`).
 	 */
+	/** Invalidate a namespace (collection name). No-op when cache is off. */
+	invalidateCache(namespace: string): void {
+		this.cache?.invalidate(namespace);
+	}
+
+	/** Current cache statistics (hits/misses/entries), or null when disabled. */
+	cacheStats(): { hits: number; misses: number; entries: number } | null {
+		return this.cache ? this.cache.stats() : null;
+	}
+
 	async request<T = unknown>(
 		method: Method,
 		path: string,
@@ -134,6 +164,28 @@ export class HttpClient {
 		// Auto-refresh if token is expired
 		if (this.authStore.isExpired && this.authStore.collectionName) {
 			await this.refreshAuth();
+		}
+
+		// ── Cache resolution (read path) ────────────────────────────────
+		// Only cacheable reads (GET) participate. Cache keys are scoped by auth
+		// token so user A's cached list can never leak to user B (or anonymous).
+		//
+		// Effective caching for this request:
+		//   - per-request { cache } / { ttl } present → use it (true enables,
+		//     false bypasses, number/object sets TTL)
+		//   - otherwise → fall back to the global cache.enabled flag
+		const cacheDirective = resolveCacheDirective(options);
+		const wantCache =
+			cacheDirective !== null
+				? cacheDirective.enabled
+				: this.cacheEnabled;
+		const cacheKey =
+			method === "GET" && this.cache && wantCache
+				? this.cacheKeyFor(method, path, options?.params)
+				: null;
+		if (cacheKey !== null) {
+			const hit = await this.cache?.get(cacheKey);
+			if (hit !== undefined) return hit as T;
 		}
 
 		// Resolve the auto-cancellation key (PocketBase `requestKey` semantics):
@@ -253,7 +305,81 @@ export class HttpClient {
 			);
 		}
 
+		// ── Cache store (read path) ─────────────────────────────────────
+		// Persist successful GET payloads when the directive wants caching.
+		if (cacheKey !== null && this.cache) {
+			const namespace = this.namespaceFromPath(path);
+			const ttl = cacheDirective?.ttl;
+			const tags = this.cacheTagsFor(path, namespace);
+			this.cache.set(
+				cacheKey,
+				data,
+				ttl,
+				namespace ?? undefined,
+				tags,
+			);
+		}
+
+		// ── Cache invalidation (write path) ────────────────────────────
+		// Mutations invalidate the affected collection's cached entries so
+		// subsequent reads don't serve stale lists. The current collection is
+		// always invalidated; `options.invalidate` adds extra namespaces.
+		if (method !== "GET" && this.cache) {
+			const namespaces = new Set<string>();
+			const ns = this.namespaceFromPath(path);
+			if (ns) namespaces.add(ns);
+			for (const extra of options?.invalidate ?? []) {
+				if (extra) namespaces.add(extra);
+			}
+			for (const nsName of namespaces) this.cache.invalidate(nsName);
+		}
+
 		return data as T;
+	}
+
+	// ── Cache key/namespace helpers ──
+
+	/** Build a token-scoped cache key: `METHOD path|token-hash|params`. */
+	private cacheKeyFor(
+		method: Method,
+		path: string,
+		params?: Record<string, string>,
+	): string {
+		const token = this.authStore.token || "anon";
+		const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+		return `${method} ${path}${qs}|${token}`;
+	}
+
+	/** Best-effort namespace (collection name) from a REST path. */
+	private namespaceFromPath(path: string): string | undefined {
+		// /posts/abc-123 → posts ; /collections/xyz → collections
+		// strip any query string first (/posts?page=1 → /posts)
+		const clean = path.split("?")[0];
+		const parts = clean.split("/").filter(Boolean);
+		if (parts.length === 0) return undefined;
+		if (parts[0] === "collections" || parts[0] === "_superusers") {
+			return parts[0];
+		}
+		return parts[0];
+	}
+
+	/**
+	 * Semantic prefix tags for `deleteByPrefix`, derived from the REST shape:
+	 * - `/{collection}?...` → `getList:{collection}`
+	 * - `/{collection}/{id}` → `getOne:{collection}`
+	 * - `/collections?...` / `/collections/{id}` → `collections:getList` / `collections:getOne`
+	 */
+	private cacheTagsFor(path: string, namespace: string | undefined): string[] {
+		if (!namespace) return [];
+		const clean = path.split("?")[0];
+		const parts = clean.split("/").filter(Boolean);
+		if (parts[0] === "collections" || parts[0] === "_superusers") {
+			const op = parts.length >= 2 ? "getOne" : "getList";
+			return [`${namespace}:${op}`];
+		}
+		// /posts (list) vs /posts/{id} (one)
+		const op = parts.length >= 2 ? "getOne" : "getList";
+		return [`${op}:${namespace}`];
 	}
 
 	/**

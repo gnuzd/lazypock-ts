@@ -32,6 +32,8 @@ import { CollectionsService } from "./collections";
 import type { CollectionSchema, SchemaField } from "./schema";
 import { generateTypes, collectionTypeName } from "./codegen";
 import { fieldTypeScriptType, fieldTypeKind, schemaFieldType } from "./typegen";
+import { CacheStore, type CacheConfig, type CacheRequestOptions } from "./cache";
+import { resolveCacheDirective } from "./cache";
 
 export {
 	AuthStore,
@@ -65,6 +67,25 @@ export type {
 	CollectionSchema,
 	SchemaField,
 };
+export type { CacheConfig, CacheRequestOptions };
+export { CacheStore, resolveCacheDirective };
+
+/**
+ * Callable cache namespace: `client.cache(config)` configures, and
+ * `client.cache.deleteByPrefix(...)` etc. manage cached entries.
+ */
+export interface CacheController {
+	/** Configure the query cache at runtime. */
+	(config?: CacheConfig): LazypockClient;
+	/** Delete every entry whose key starts with `prefix` (e.g. `getList:posts`). */
+	deleteByPrefix(prefix: string): void;
+	/** Invalidate a collection's cached entries (alias of invalidateCache). */
+	invalidate(namespace: string): void;
+	/** Drop every cached entry. */
+	clear(): void;
+	/** Cache hit/miss/entry stats, or null when never configured. */
+	stats(): { hits: number; misses: number; entries: number } | null;
+}
 
 /** Options for constructing a {@link LazypockClient}. */
 export interface LazypockClientOptions {
@@ -76,6 +97,24 @@ export interface LazypockClientOptions {
 	authStore?: AuthStore;
 	/** Real-time service for Phoenix Channel WebSocket subscriptions */
 	realtime?: RealtimeService;
+	/**
+	 * Query cache configuration. Disabled by default.
+	 *
+	 * ```ts
+	 * const client = createClient({
+	 *   baseUrl: '...',
+	 *   cache: {
+	 *     enabled: true,
+	 *     defaultTTL: 30_000,
+	 *     store: myStorage,      // optional persistence (same interface as auth)
+	 *   },
+	 * });
+	 * ```
+	 *
+	 * When enabled, readable GETs are cached. Requests can opt out via
+	 * `{ cache: false }`, or opt in with a custom TTL via `{ ttl: ms }`.
+	 */
+	cache?: CacheConfig;
 	/**
 	 * Optional schema types for generating typed services at runtime.
 	 * When provided, `collection()` returns a service whose create/update
@@ -110,6 +149,9 @@ export class LazypockClient {
 	readonly files: FilesService;
 	private collectionCache = new Map<string, CollectionService>();
 	private schemaByName?: Map<string, CollectionSchema>;
+	private cacheStore?: CacheStore;
+	/** Namespace → realtime unsubscribe; used for realtime-driven invalidation. */
+	private realtimeInvalidators = new Map<string, () => void>();
 
 	/**
 	 * Create a new Lazypock client.
@@ -127,6 +169,14 @@ export class LazypockClient {
 		}
 		this.files = new FilesService(this.http);
 		this.collections = new CollectionsService(this.http, this.realtime);
+		if (options.cache) {
+			this.cacheStore = new CacheStore({
+				defaultTTL: options.cache.defaultTTL,
+				store: options.cache.store,
+				maxEntries: options.cache.maxEntries,
+			});
+			this.http.setCache(this.cacheStore, options.cache.enabled ?? false);
+		}
 		if (options.types?.schemas) {
 			this.schemaByName = new Map(
 				options.types.schemas.map((s) => [s.name, s]),
@@ -213,6 +263,100 @@ export class LazypockClient {
 	cancelAllRequests(): this {
 		this.http.cancelAllRequests();
 		return this;
+	}
+
+	// ── Query cache (opt-in by default; opt-out per request) ──
+
+	/**
+	 * Configure the query cache at runtime (also a namespace for cache
+	 * management methods).
+	 *
+	 * ```ts
+	 * client.cache({ enabled: true, defaultTTL: 30_000 });
+	 * client.cache.deleteByPrefix('getList:posts');  // all list caches for posts
+	 * client.cache.deleteByPrefix('getOne:posts');   // all one-record caches
+	 * ```
+	 *
+	 * When enabled, GET requests cache their payload; mutations invalidate the
+	 * affected collection automatically. Individual requests can opt out with
+	 * `{ cache: false }` or override the TTL with `{ ttl: ms }`.
+	 */
+	readonly cache: CacheController = Object.assign(
+		((config?: CacheConfig) => {
+			if (!this.cacheStore) {
+				// Lazy-create so `.cache({ enabled: true })` works even when the
+				// constructor wasn't given cache config.
+				this.cacheStore = new CacheStore({
+					defaultTTL: config?.defaultTTL,
+					store: config?.store,
+					maxEntries: config?.maxEntries,
+				});
+				this.http.setCache(this.cacheStore, config?.enabled ?? true);
+			} else {
+				if (config?.enabled !== undefined) {
+					this.http.setCache(this.cacheStore, config.enabled);
+				}
+			}
+			return this;
+		}) as (config?: CacheConfig) => LazypockClient,
+		{
+			deleteByPrefix: (prefix: string) => this.cacheStore?.deleteByPrefix(prefix),
+			invalidate: (namespace: string) => this.cacheStore?.invalidate(namespace),
+			clear: () => {
+				this.cacheStore?.clear();
+				for (const unsub of this.realtimeInvalidators.values()) unsub();
+				this.realtimeInvalidators.clear();
+			},
+			stats: () => (this.cacheStore ? this.cacheStore.stats() : null),
+		},
+	);
+
+	/**
+	 * Drop every cached entry (all collections / namespaces).
+	 * Also disables realtime-driven invalidation subscriptions.
+	 */
+	clearCache(): this {
+		this.cacheStore?.clear();
+		for (const unsub of this.realtimeInvalidators.values()) unsub();
+		this.realtimeInvalidators.clear();
+		return this;
+	}
+
+	/**
+	 * Invalidate cached entries for a collection (or custom namespace).
+	 * Runs automatically on mutations — call explicitly when data changed
+	 * out-of-band (e.g. another client wrote to the same collection).
+	 */
+	invalidateCache(namespace: string): this {
+		this.cacheStore?.invalidate(namespace);
+		return this;
+	}
+
+	/**
+	 * Cache hit/miss/entry statistics.
+	 * Returns null when caching was never configured.
+	 */
+	cacheStats(): { hits: number; misses: number; entries: number } | null {
+		return this.cacheStore ? this.cacheStore.stats() : null;
+	}
+
+	/**
+	 * Subscribe a collection's cache to realtime invalidation: any inbound
+	 * create/update/delete event for the collection clears its cached entries.
+	 * Returns an unsubscribe function.
+	 */
+	invalidateCacheOnRealtime(collectionName: string): () => void {
+		if (!this.cacheStore) {
+			// ensure a store exists so invalidation has somewhere to go
+			this.cache({ enabled: false });
+		}
+		const existing = this.realtimeInvalidators.get(collectionName);
+		if (existing) return existing;
+		const unsub = this.collection(collectionName).subscribe(() => {
+			this.cacheStore?.invalidate(collectionName);
+		});
+		this.realtimeInvalidators.set(collectionName, unsub);
+		return unsub;
 	}
 
 	// ── Auth ──
