@@ -10,6 +10,7 @@ import {
 	createClient,
 	TypedClient,
 	type LazypockCollections,
+	type CacheConfig,
 } from "./src/index";
 
 // A hand-rolled collections map (simulating codegen output)
@@ -87,5 +88,35 @@ if (postList) {
 	// @ts-expect-error items are Post[], title is string not number
 	const n: number = postList.items[0].title;
 }
+
+// ── 5. cache options typing ──
+const cacheCfg: CacheConfig = { enabled: true, defaultTTL: 30_000 };
+const withCache = new LazypockClient({
+	baseUrl: "http://localhost:4000/api",
+	cache: cacheCfg,
+});
+withCache.cache({ enabled: false });
+withCache.clearCache();
+withCache.invalidateCache("posts");
+withCache.cache.deleteByPrefix("getList:posts");
+withCache.cache.invalidate("posts");
+withCache.cache.clear();
+const cacheStats2 = withCache.cache.stats();
+if (cacheStats2) {
+	// @ts-expect-error hits is number, not string
+	const badStats: string = cacheStats2.hits;
+}
+const stats = withCache.cacheStats();
+if (stats) {
+	// @ts-expect-error hits is number, not string
+	const bad: string = stats.hits;
+}
+// cache/ttl/invalidate flow through request options
+typed.collection("posts").getList(1, 20, { cache: true });
+typed.collection("posts").getList(1, 20, { ttl: 120_000 });
+typed.collection("posts").getList(1, 20, { cache: false });
+typed.collection("posts").create({ title: "hi" }, { invalidate: ["users"] });
+// @ts-expect-error cache must be boolean/number/object, not a string
+typed.collection("posts").getList(1, 20, { cache: "yes" });
 
 console.log("type-test OK (compile-time checks only)");

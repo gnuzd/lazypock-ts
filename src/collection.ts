@@ -90,19 +90,42 @@ export class CollectionService<T = ApiRecord> {
 		perPage = 30,
 		options?: Record<string, unknown> & RequestOptions,
 	): Promise<ListResult<T2> | null> {
-		const { requestKey, autoCancel, cancelKey, ...rest } = options ?? {};
+		const {
+			requestKey,
+			autoCancel,
+			cancelKey,
+			fetch,
+			headers,
+			signal,
+			cache,
+			ttl,
+			invalidate,
+			params,
+			...queryParams
+		} = options ?? {};
 		const qs = new URLSearchParams(
 			Object.fromEntries(
 				Object.entries({
 					page: String(page),
 					perPage: String(perPage),
-					...rest,
+					...queryParams,
 				}).map(([k, v]) => [k, String(v)]),
 			),
 		).toString();
 		return this.http.get<ListResult<T2>>(
 			"/" + this.encodeId(this.collectionName) + "?" + qs,
-			{ requestKey, autoCancel, cancelKey },
+			{
+				requestKey,
+				autoCancel,
+				cancelKey,
+				fetch,
+				headers,
+				signal,
+				cache,
+				ttl,
+				invalidate,
+				params,
+			} as RequestOptions,
 		);
 	}
 
