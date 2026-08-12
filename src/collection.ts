@@ -13,6 +13,36 @@ import type {
 import type { RealtimeService } from "./realtime";
 
 /**
+ * Deterministic JSON stringify for building a stable cache/dedup key.
+ * Strips request-transport keys (`requestKey`, `singleFlight`, `fetch`,
+ * `signal`) so functionally-identical calls share one key.
+ */
+export function stableStringify(value: unknown): string {
+	const seen = new Set<object>();
+	const sort = (v: unknown): unknown => {
+		if (Array.isArray(v)) return v.map(sort);
+		if (v && typeof v === "object") {
+			if (seen.has(v as object)) return "[Circular]";
+			seen.add(v as object);
+			const out: Record<string, unknown> = {};
+			for (const k of Object.keys(v as object).sort()) {
+				if (k === "requestKey" || k === "singleFlight" || k === "fetch" || k === "signal") {
+					continue;
+				}
+				out[k] = sort((v as Record<string, unknown>)[k]);
+			}
+			return out;
+		}
+		return v;
+	};
+	try {
+		return JSON.stringify(sort(value));
+	} catch {
+		return String(value);
+	}
+}
+
+/**
  * A realtime record-change event delivered to subscription callbacks.
  * Mirrors PocketBase's RealtimeService result shape (`action` + `record`).
  */
@@ -100,6 +130,7 @@ export class CollectionService<T = ApiRecord> {
 			cache,
 			ttl,
 			invalidate,
+			singleFlight,
 			params,
 			...queryParams
 		} = options ?? {};
@@ -124,6 +155,7 @@ export class CollectionService<T = ApiRecord> {
 				cache,
 				ttl,
 				invalidate,
+				singleFlight,
 				params,
 			} as RequestOptions,
 		);
@@ -139,6 +171,17 @@ export class CollectionService<T = ApiRecord> {
 		options?: Record<string, unknown> & RequestOptions,
 	): Promise<Array<T2>> {
 		const { batch = 1000, ...rest } = options ?? {};
+
+		// Build a stable request key for the whole full-list fetch (NOT per page,
+		// which would break dedup). Concurrent identical getFullList() calls share
+		// this key via single-flight, so they don't fire duplicate requests. Pages
+		// still advance correctly: each page's URL differs (page=N in the query),
+		// so the underlying default key is unique per page — no cross-page cancel.
+		const effectiveKey =
+			typeof rest.requestKey === "string"
+				? rest.requestKey
+				: `getFullList:${this.collectionName}:${stableStringify(rest)}`;
+
 		const items: T2[] = [];
 		let page = 1;
 		for (;;) {
@@ -146,9 +189,9 @@ export class CollectionService<T = ApiRecord> {
 				page,
 				batch as number,
 				{
-					// disable auto-cancellation across pages — each page request is unique
 					...rest,
-					requestKey: null,
+					requestKey: effectiveKey,
+					singleFlight: true,
 				} as Record<string, unknown> & RequestOptions,
 			);
 			if (!res || !res.items || res.items.length === 0) break;

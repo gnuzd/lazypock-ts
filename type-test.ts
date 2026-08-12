@@ -118,5 +118,7 @@ typed.collection("posts").getList(1, 20, { cache: false });
 typed.collection("posts").create({ title: "hi" }, { invalidate: ["users"] });
 // @ts-expect-error cache must be boolean/number/object, not a string
 typed.collection("posts").getList(1, 20, { cache: "yes" });
+typed.collection("posts").getFullList({ singleFlight: true });
+typed.collection("posts").getFullList({ requestKey: "my-full-list" });
 
 console.log("type-test OK (compile-time checks only)");
