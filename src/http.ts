@@ -34,6 +34,14 @@ export class HttpClient {
 	 */
 	private cancelControllers: Record<string, AbortController> = {};
 
+	/**
+	 * In-flight request promises, keyed by cancellation key. When auto-cancellation
+	 * would abort a pending duplicate, the newer request instead awaits the same
+	 * promise — single-flight coalescing (no duplicate network request, no
+	 * spurious abort rejection for the caller).
+	 */
+	private inflight: Record<string, Promise<unknown>> = {};
+
 	/** Global toggle for the auto-cancellation behaviour (default: on). */
 	private enableAutoCancellation = true;
 
@@ -200,6 +208,16 @@ export class HttpClient {
 				: options.requestKey;
 		if (options?.autoCancel === false) requestKey = null;
 
+		// Single-flight coalescing: when the same requestKey is already in-flight
+		// and the caller opted in, reuse that promise instead of firing a duplicate
+		// request (no abort rejection for either caller).
+		if (options?.singleFlight && requestKey !== null) {
+			const pending = this.inflight[requestKey];
+			if (pending !== undefined) {
+				return pending as Promise<T | null>;
+			}
+		}
+
 		// Wire a fresh AbortController for this request, merging any caller signal.
 		// When auto-cancellation is enabled, the previous pending request sharing
 		// our key is aborted first (only the last duplicate executes).
@@ -221,6 +239,52 @@ export class HttpClient {
 		}
 		const signal = controller?.signal ?? externalSignal;
 
+		// Register the in-flight promise so later single-flight callers reuse it.
+		// The promise is created from an inner async fn that performs the request
+		// and clears itself from the inflight map on settle.
+		const perform = async (): Promise<T | null> => {
+			try {
+				return await this.doRequest(
+					method,
+					path,
+					body,
+					options,
+					signal,
+					requestKey,
+					controller,
+					cacheKey,
+					cacheDirective,
+				);
+			} finally {
+				if (requestKey !== null) {
+					if (this.inflight[requestKey] === promise) {
+						delete this.inflight[requestKey];
+					}
+				}
+			}
+		};
+		const promise = perform();
+		if (requestKey !== null) {
+			this.inflight[requestKey] = promise;
+		}
+		return promise;
+	}
+
+	/**
+	 * Execute the actual HTTP request (fetch + parse + cache). Called by {@link request}
+	 * as the inner in-flight unit so single-flight callers can reuse the promise.
+	 */
+	private async doRequest<T = unknown>(
+		method: Method,
+		path: string,
+		body: unknown,
+		options: RequestOptions | undefined,
+		signal: AbortSignal | null | undefined,
+		requestKey: string | null,
+		controller: AbortController | null,
+		cacheKey: string | null,
+		cacheDirective: ReturnType<typeof resolveCacheDirective>,
+	): Promise<T | null> {
 		let url = this.baseUrl + path;
 		if (options?.params) {
 			const qs = new URLSearchParams(options.params).toString();

@@ -358,6 +358,34 @@ client.cancelRequest('GET /api/posts?page=1');
 client.cancelAllRequests();
 ```
 
+#### Single-flight dedup (`getFullList`)
+
+`getFullList()` (and `collections.getFullList()`) are **single-flight**: concurrent
+calls with the same effective options share one in-flight request instead of
+firing duplicates. This means the common pattern below results in **one**
+network request, and **both** callers resolve with the same data — no abort
+rejection:
+
+```typescript
+const [a, b] = await Promise.all([
+  client.collection('posts').getFullList(),
+  client.collection('posts').getFullList(),
+]);
+// one GET fired; a === b
+```
+
+Calls with **different** options (e.g. different `sort`/`filter`) are still
+distinct requests. Multi-page fetches continue to work normally — each page
+request is unique (page number is part of the URL), so pages never cancel each
+other.
+
+The underlying `singleFlight` option is also available on any request when you
+want to coalesce concurrent identical calls yourself:
+
+```typescript
+await client.collection('posts').getList(1, 20, { singleFlight: true });
+```
+
 ## Query Cache
 
 Lazypock has a built-in query cache for **GET** requests — disabled by default.

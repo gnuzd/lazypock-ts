@@ -731,6 +731,105 @@ await (async () => {
 	unsub();
 })();
 
+// ── getFullList single-flight dedup (issue #2) ──
+// Concurrent identical getFullList() calls must not fire duplicate requests.
+// Different options must remain distinct.
+
+await (async () => {
+	const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+	const counters = new Map();
+	const fetchMock = async (url, init) => {
+		const signal = init?.signal;
+		counters.set(String(url), (counters.get(String(url)) ?? 0) + 1);
+		await new Promise((resolve, reject) => {
+			if (signal?.aborted)
+				return reject(new DOMException("Aborted", "AbortError"));
+			signal?.addEventListener(
+				"abort",
+				() => reject(new DOMException("Aborted", "AbortError")),
+				{ once: true },
+			);
+			setTimeout(resolve, 30);
+		});
+		return {
+			ok: true,
+			status: 200,
+			text: async () =>
+				JSON.stringify({
+					items: [{ id: "1" }, { id: "2" }],
+					page: 1,
+					perPage: 1000,
+					totalItems: 2,
+					totalPages: 1,
+				}),
+		};
+	};
+	const callCount = (url) => counters.get(url) ?? 0;
+	const c = new LazypockClient({ baseUrl: "http://x/api" });
+
+	// concurrent identical calls → 1 request, both resolve
+	const url = "http://x/api/posts?page=1&perPage=1000";
+	const [a, b] = await Promise.allSettled([
+		c.collection("posts").getFullList({ fetch: fetchMock }),
+		c.collection("posts").getFullList({ fetch: fetchMock }),
+	]);
+	check("getFullList dedup: 1 request for concurrent calls", callCount(url), 1);
+	check("getFullList dedup: first resolves", a.status, "fulfilled");
+	check("getFullList dedup: second resolves", b.status, "fulfilled");
+	check("getFullList dedup: same data", a.value?.length, 2);
+
+	// different options → still distinct requests
+	const c2 = new LazypockClient({ baseUrl: "http://x/api" });
+	counters.clear();
+	const [x, y] = await Promise.allSettled([
+		c2.collection("posts").getFullList({ fetch: fetchMock, sort: "title" }),
+		c2.collection("posts").getFullList({ fetch: fetchMock, sort: "-title" }),
+	]);
+	check("getFullList dedup: different sort → 2 requests", counters.size, 2);
+	check("getFullList dedup: both resolve", x.status, "fulfilled");
+	check("getFullList dedup: second sort resolves", y.status, "fulfilled");
+
+	// multi-page pagination still works end-to-end
+	const pages = [
+		[{ id: "1" }, { id: "2" }],
+		[{ id: "3" }, { id: "4" }],
+	];
+	const pageFetch = async (url, init) => {
+		const signal = init?.signal;
+		counters.set(String(url), (counters.get(String(url)) ?? 0) + 1);
+		await new Promise((resolve, reject) => {
+			if (signal?.aborted)
+				return reject(new DOMException("Aborted", "AbortError"));
+			signal?.addEventListener(
+				"abort",
+				() => reject(new DOMException("Aborted", "AbortError")),
+				{ once: true },
+			);
+			setTimeout(resolve, 10);
+		});
+		const m = String(url).match(/page=(\d+)/);
+		const page = m ? Number(m[1]) : 1;
+		const items = pages[page - 1] ?? [];
+		return {
+			ok: true,
+			status: 200,
+			text: async () =>
+				JSON.stringify({
+					items,
+					page,
+					perPage: 1000,
+					totalItems: 4,
+					totalPages: 2,
+				}),
+		};
+	};
+	const c3 = new LazypockClient({ baseUrl: "http://x/api" });
+	const multi = await c3.collection("multi").getFullList({ fetch: pageFetch });
+	check("getFullList dedup: multi-page returns 4 items", multi?.length, 4);
+	const pageReqs = [...counters.keys()].filter((k) => k.includes("/multi?")).length;
+	check("getFullList dedup: multi-page = 2 page requests", pageReqs, 2);
+})();
+
 console.log(
 	failures === 0 ? "\n✅ All smoke tests passed" : `\n❌ ${failures} failures`,
 );

@@ -99,6 +99,17 @@ export interface RequestOptions {
 	 * Alias of `requestKey` (PocketBase `$cancelKey` compat).
 	 */
 	cancelKey?: string;
+	/**
+	 * Coalesce concurrent identical requests (same `requestKey`) onto a single
+	 * in-flight promise instead of aborting the earlier one.
+	 *
+	 * When enabled, a request arriving while another with the same key is still
+	 * pending awaits the same result — no duplicate network request, and the
+	 * caller of the first request never sees an abort rejection.
+	 *
+	 * @default false (auto-cancellation aborts the earlier duplicate)
+	 */
+	singleFlight?: boolean;
 }
 
 export class ApiError extends Error {

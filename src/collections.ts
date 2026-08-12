@@ -12,6 +12,7 @@
 
 import type { HttpClient } from "./http";
 import type { RealtimeService } from "./realtime";
+import { stableStringify } from "./collection";
 import type { ListResult, RequestOptions, ApiRecord } from "./types";
 
 const REGISTRY_TOPIC = "collections";
@@ -74,15 +75,50 @@ export class CollectionsService {
 	): Promise<Array<T>> {
 		if (!this.http) return [];
 		const { batch = 1000, ...rest } = options ?? {};
+
+		// Extract request-transport options so they never leak into query params.
+		const {
+			requestKey: reqKey,
+			singleFlight: _singleFlight,
+			fetch: fetchFn,
+			headers: hdrs,
+			signal: sig,
+			cache: cacheOpt,
+			ttl: ttlOpt,
+			invalidate: inval,
+			params: passthroughParams,
+			...queryParams
+		} = rest as Record<string, unknown> & RequestOptions;
+
+		// Stable key for the whole full-list fetch — see CollectionService.getFullList
+		// for the rationale (single-flight dedup, per-page paths stay unique).
+		const effectiveKey =
+			typeof reqKey === "string"
+				? reqKey
+				: `getFullList:collections:${stableStringify(rest)}`;
+
 		const items: T[] = [];
 		let page = 1;
 		// Auto-paginate until empty (bounded by perPage and totalPages).
 		for (;;) {
-			const res = await this.getList<T>({
-				...rest,
-				page,
-				perPage: batch,
-			} as Record<string, unknown>);
+			const res = await this.getList<T>(
+				{
+					...queryParams,
+					...(passthroughParams ?? {}),
+					page,
+					perPage: batch,
+				},
+				{
+					requestKey: effectiveKey,
+					singleFlight: true,
+					...(fetchFn ? { fetch: fetchFn } : {}),
+					...(hdrs ? { headers: hdrs } : {}),
+					...(sig ? { signal: sig } : {}),
+					...(cacheOpt !== undefined ? { cache: cacheOpt } : {}),
+					...(ttlOpt !== undefined ? { ttl: ttlOpt } : {}),
+					...(inval ? { invalidate: inval } : {}),
+				} as RequestOptions,
+			);
 			if (!res || !res.items || res.items.length === 0) break;
 			items.push(...(res.items as T[]));
 			if (page >= (res.totalPages ?? page)) break;
