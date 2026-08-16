@@ -179,21 +179,12 @@ The main client class.
 | `storage` | `StorageAdapter` | `memoryStorage` | Custom storage adapter for token persistence |
 | `authStore` | `AuthStore` | auto-created | Explicit auth store instance |
 | `realtime` | `RealtimeService` | auto-created | Real-time service for WebSocket subscriptions |
-| `cache` | [`CacheConfig`](#query-cache) | disabled | Query-cache configuration (opt-in) |
 
 #### Auto-Cancellation Methods
 
 - `autoCancellation(enable)` — Globally enable/disable auto-cancellation of duplicated pending requests
 - `cancelRequest(requestKey)` — Abort a single pending request by key (default `HTTP_METHOD + path`)
 - `cancelAllRequests()` — Abort all pending requests
-
-#### Query-Cache Methods
-
-- `cache(config?)` — Enable/configure the query cache at runtime (see [Query Cache](#query-cache))
-- `clearCache()` — Drop every cached entry
-- `invalidateCache(namespace)` — Invalidate entries for a collection / custom namespace
-- `cacheStats()` — `{ hits, misses, entries }` cache statistics
-- `invalidateCacheOnRealtime(collection)` — Subscribe the cache to realtime events for a collection; returns an unsubscribe fn
 
 #### Authentication Methods
 
@@ -384,104 +375,6 @@ want to coalesce concurrent identical calls yourself:
 
 ```typescript
 await client.collection('posts').getList(1, 20, { singleFlight: true });
-```
-
-## Query Cache
-
-Lazypock has a built-in query cache for **GET** requests — disabled by default.
-It's useful for read-heavy UIs (lists, dashboards) to avoid hammering the server.
-
-### Enabling
-
-```typescript
-import { createClient } from "lazypock";
-
-const client = createClient({
-  baseUrl: "https://api.example.com",
-  cache: {
-    enabled: true,
-    defaultTTL: 30_000, // 30s
-    // store: myStorage, // optional: reuse any StorageAdapter (localStorage/AsyncStorage)
-  },
-});
-```
-
-When enabled, **all** GET requests are cached with the default TTL, and
-mutations (`create`/`update`/`delete`) automatically invalidate the affected
-collection's cached entries.
-
-### Per-request control
-
-```typescript
-// Cache this request (works even when the global cache is off)
-await client.collection('posts').getList(1, 20, { cache: true });
-
-// Bypass the cache — always fetch fresh (and don't store the result)
-const fresh = await client.collection('posts').getList(1, 20, { cache: false });
-
-// Custom TTL for this request
-await client.collection('posts').getOne('abc', { ttl: 120_000 });
-
-// Cache with a custom key (dedupe/override the default `METHOD path|token` key)
-await client.collection('posts').getList(1, 20, { cache: { ttl: 60_000, key: 'my-list' } });
-```
-
-### Prefix deletion (per-operation invalidation)
-
-Every cached entry is tagged with its operation and collection, so you can
-invalidate a whole class of caches without touching the rest:
-
-```typescript
-client.cache.deleteByPrefix('getList:posts'); // delete all getList cache for posts
-client.cache.deleteByPrefix('getOne:posts');  // delete all getOne cache for posts
-client.cache.deleteByPrefix('collections:getList'); // admin collection list caches
-```
-
-The `client.cache` namespace also exposes `invalidate(ns)`, `clear()`, `stats()`,
-and is callable to (re)configure (`client.cache({ enabled: true })`).
-
-### Invalidation
-
-```typescript
-// Mutations invalidate the collection automatically:
-await client.collection('posts').create({ title: 'New' });
-await client.collection('posts').getList(1, 20); // re-fetched (cache cleared)
-
-// Invalidate extra namespaces explicitly:
-await client.collection('posts').create(
-  { title: 'New' },
-  { invalidate: ['users'] },
-);
-
-// Manual / out-of-band invalidation:
-client.invalidateCache('posts');
-client.clearCache();
-```
-
-### Cache key scoping
-
-Cache keys are **scoped by auth token** — a logged-in user's cached data can
-never leak to another user (or to anonymous visitors). Logging out/in changes
-the token, so cached entries are naturally isolated per identity.
-
-### Realtime-driven invalidation
-
-```typescript
-// Keep the posts cache fresh: any create/update/delete event clears it.
-const stop = client.invalidateCacheOnRealtime('posts');
-// later:
-stop();
-```
-
-When a realtime event arrives for the collection, its cached entries are
-cleared so the next read fetches fresh data. This is **invalidate-only** —
-cached list payloads are never mutated in place (a filter/sort change could
-make an in-place patch serve wrong data).
-
-### Stats
-
-```typescript
-client.cacheStats(); // { hits, misses, entries }
 ```
 
 ## Error Handling

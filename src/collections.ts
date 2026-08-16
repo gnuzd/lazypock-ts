@@ -83,9 +83,6 @@ export class CollectionsService {
 			fetch: fetchFn,
 			headers: hdrs,
 			signal: sig,
-			cache: cacheOpt,
-			ttl: ttlOpt,
-			invalidate: inval,
 			params: passthroughParams,
 			...queryParams
 		} = rest as Record<string, unknown> & RequestOptions;
@@ -114,9 +111,6 @@ export class CollectionsService {
 					...(fetchFn ? { fetch: fetchFn } : {}),
 					...(hdrs ? { headers: hdrs } : {}),
 					...(sig ? { signal: sig } : {}),
-					...(cacheOpt !== undefined ? { cache: cacheOpt } : {}),
-					...(ttlOpt !== undefined ? { ttl: ttlOpt } : {}),
-					...(inval ? { invalidate: inval } : {}),
 				} as RequestOptions,
 			);
 			if (!res || !res.items || res.items.length === 0) break;

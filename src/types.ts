@@ -66,18 +66,6 @@ export interface RequestOptions {
 	/** Custom fetch implementation (for RN or test mocking) */
 	fetch?: typeof globalThis.fetch;
 	/**
-	 * Cache control for this request (see {@link CacheRequestOptions}).
-	 * Resolved against the client's global cache config when unset.
-	 */
-	cache?: boolean | number | { ttl?: number; key?: string };
-	/** Alias of `cache: <ms>` — cache this GET for `ttl` milliseconds. */
-	ttl?: number;
-	/**
-	 * Extra cache namespaces to invalidate when this mutation succeeds.
-	 * The current collection is always invalidated automatically.
-	 */
-	invalidate?: string[];
-	/**
 	 * Request identifier used by the auto-cancellation mechanism.
 	 *
 	 * Pending requests sharing the same key cancel each other — only the

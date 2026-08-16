@@ -23,8 +23,6 @@ export {
 	fieldTypeScriptType,
 	fieldTypeKind,
 	schemaFieldType,
-	CacheStore,
-	resolveCacheDirective,
 } from "./lazypock";
 export { TypedClient, createClient } from "./client";
 
@@ -40,9 +38,6 @@ export type {
 	SystemFields,
 	RequestOptions,
 	FileRecord,
-	// cache
-	CacheConfig,
-	CacheRequestOptions,
 	// schema
 	CollectionSchema,
 	SchemaField,
