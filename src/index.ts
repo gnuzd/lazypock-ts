@@ -41,6 +41,14 @@ export type {
 	// schema
 	CollectionSchema,
 	SchemaField,
+	// schema-driven query typing
+	ListOptions,
+	ReadOptions,
+	FilterString,
+	SortString,
+	ExpandString,
+	FilterOp,
+	FieldKey,
 	// options
 	LazypockClientOptions,
 } from "./lazypock";

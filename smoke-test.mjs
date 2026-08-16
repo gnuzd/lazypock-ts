@@ -149,7 +149,11 @@ check(
 	source.includes("export interface BlogPostsRecord"),
 	true,
 );
-check("password omitted from record", !source.includes("password"), true);
+check(
+	"password omitted from record interface",
+	!source.includes('"password"?:') && !source.includes('"password": never'),
+	true,
+);
 check("select union in output", source.includes('"admin" | "member"'), true);
 check("relation→string", source.includes('"author"?: string;'), true);
 check("multi_select→array", source.includes('"tags"?: ("ts" | "js")[];'), true);
@@ -533,6 +537,147 @@ await (async () => {
 	check("getFullList dedup: multi-page returns 4 items", multi?.length, 4);
 	const pageReqs = [...counters.keys()].filter((k) => k.includes("/multi?")).length;
 	check("getFullList dedup: multi-page = 2 page requests", pageReqs, 2);
+})();
+
+// ── select() field projection + schema-driven fields ──
+// select(...fields) sends a `fields` param; without a select() call (or
+// select("*")) all non-hidden fields are requested when a schema is known.
+
+await (async () => {
+	const store = {
+		token: "",
+		collectionName: null,
+		isExpired: false,
+		set() {},
+		setCollectionName() {},
+		clear() {},
+	};
+
+	// schema with a hidden field + a relation field
+	const postsSchema = {
+		name: "posts",
+		type: "base",
+		fields: [
+			{ name: "title", type: "text", required: true },
+			{ name: "published", type: "bool" },
+			{ name: "secret_note", type: "text", hidden: true },
+			{ name: "author", type: "relation", options: { collection: "users" } },
+		],
+	};
+
+	const urls = [];
+	const fetchMock = async (url) => {
+		urls.push(String(url));
+		return {
+			ok: true,
+			status: 200,
+			text: async () =>
+				JSON.stringify({
+					items: [{ id: "1" }],
+					page: 1,
+					perPage: 30,
+					totalItems: 1,
+					totalPages: 1,
+				}),
+		};
+	};
+	const lastUrl = () => urls[urls.length - 1];
+
+	// 1. select("id", "title") → fields=id,title
+	{
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await c
+			.collection("posts")
+			.select("id", "title")
+			.getList(1, 20, { fetch: fetchMock });
+		check("select() adds fields=id,title", lastUrl().includes("fields=id%2Ctitle"), true);
+	}
+
+	// 2. select("*") + schema → visible fields (hidden excluded)
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema] },
+		});
+		await c.collection("posts").select("*").getList(1, 20, { fetch: fetchMock });
+		check(
+			"select(*) + schema → fields=visible (hidden excluded)",
+			lastUrl().includes("fields=title%2Cpublished%2Cauthor"),
+			true,
+		);
+	}
+
+	// 3. no select() + schema → same visible default
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema] },
+		});
+		await c.collection("posts").getList(1, 20, { fetch: fetchMock });
+		check(
+			"no select() + schema → fields=visible by default",
+			lastUrl().includes("fields=title%2Cpublished%2Cauthor"),
+			true,
+		);
+	}
+
+	// 4. no schema → no fields param
+	{
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await c.collection("posts").getList(1, 20, { fetch: fetchMock });
+		check("no schema → no fields param", !lastUrl().includes("fields="), true);
+	}
+
+	// 5. explicit options.fields overrides the select() preset
+	{
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await c
+			.collection("posts")
+			.select("id", "title")
+			.getList(1, 20, { fetch: fetchMock, fields: "title" });
+		check("options.fields overrides select()", lastUrl().includes("fields=title"), true);
+	}
+
+	// 6. getOne applies the preset too
+	{
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await c
+			.collection("posts")
+			.select("id", "title")
+			.getOne("abc", { fetch: fetchMock });
+		check("select() applies to getOne", lastUrl().includes("fields=id%2Ctitle"), true);
+	}
+
+	// 7. select() returns a derived service — the original is untouched
+	{
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		const svc = c.collection("posts");
+		const projected = svc.select("title");
+		await svc.getList(1, 20, { fetch: fetchMock });
+		check("original service unaffected by select()", !lastUrl().includes("fields="), true);
+		await projected.getList(1, 20, { fetch: fetchMock });
+		check("derived service sends fields=title", lastUrl().includes("fields=title"), true);
+	}
+
+	// 8. expand validation warns on non-relation fields (schema known)
+	{
+		const warns = [];
+		const origWarn = console.warn;
+		console.warn = (...a) => warns.push(a.join(" "));
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema] },
+		});
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "title" });
+		console.warn = origWarn;
+		check(
+			"expand(non-relation) warns when schema known",
+			warns.some((w) => w.includes("expand(\"title\")") && w.includes("not a relation")),
+			true,
+		);
+	}
 })();
 
 console.log(

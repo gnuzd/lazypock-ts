@@ -106,6 +106,27 @@ export function generateTypes(
 ${mapEntries}
 }`);
 
+	// Runtime schema snapshot — lets the client exclude hidden fields by
+	// default, validate select/expand, and derive visible field lists.
+	const schemaEntries = collections
+		.map(
+			(c) =>
+				`  {
+    id: ${JSON.stringify(c.id ?? null)},
+    name: ${JSON.stringify(c.name)},
+    type: ${JSON.stringify(c.type)},
+    system: ${JSON.stringify(c.system ?? false)},
+    fields: ${JSON.stringify(c.fields ?? [], null, 2)},
+    rules: ${JSON.stringify(c.rules ?? {})},
+    options: ${JSON.stringify(c.options ?? {})},
+  }`,
+		)
+		.join(",\n");
+	sections.push(`// Schema snapshot (runtime) — hidden-field exclusion + query validation.
+export const lazypockSchema: import("${packageName}").CollectionSchema[] = [
+${schemaEntries}
+];`);
+
 	// createClient factory
 	sections.push(`import { LazypockClient, type LazypockClientOptions, type CollectionService } from "${packageName}";
 
@@ -113,9 +134,18 @@ ${mapEntries}
  * Create a Lazypock client typed against this schema snapshot.
  * Collection access is fully type-checked:
  *   client.collection("posts").create({ title: "x" }) // title must exist
+ *
+ * The schema snapshot is wired into the client automatically, so hidden
+ * fields are excluded from responses and select/expand are validated.
  */
 export function createClient(options: LazypockClientOptions): TypedClient {
-  return new TypedClient(options);
+  return new TypedClient({
+    ...options,
+    types: {
+      ...options.types,
+      schemas: options.types?.schemas ?? lazypockSchema,
+    },
+  });
 }
 
 export class TypedClient extends LazypockClient {
@@ -142,6 +172,9 @@ function renderInterface(opts: { extends?: string; body: string }): string {
 
 /** Render a single interface member line for a field. */
 function memberLine(f: SchemaField): string {
+	// Hidden fields are excluded from API responses by the schema-aware
+	// client default — don't expose them on the read model either.
+	if (f.hidden) return "";
 	const key = fieldKey(f.name);
 	const req = f.required || f.type === "password" ? "" : "?";
 	const type = fieldTypeScriptType(f);

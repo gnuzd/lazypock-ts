@@ -9,8 +9,13 @@ import type {
 	RequestOptions,
 	CreateData,
 	UpdateData,
+	ListOptions,
+	ReadOptions,
+	FilterString,
+	FieldKey,
 } from "./types";
 import type { RealtimeService } from "./realtime";
+import type { CollectionSchema } from "./schema";
 
 /**
  * Deterministic JSON stringify for building a stable cache/dedup key.
@@ -90,6 +95,14 @@ export class CollectionService<T = ApiRecord> {
 	private collectionName: string;
 	private authStore?: AuthStore;
 	private realtime?: RealtimeService;
+	/** Optional schema for this collection (from client `types.schemas`). */
+	private schema?: CollectionSchema;
+	/**
+	 * Active field projection from {@link select}. `"*"` (or unset) means
+	 * "all visible (non-hidden) fields" — resolved against the schema when
+	 * one is available, otherwise left to the server.
+	 */
+	private fieldsPreset?: string;
 
 	/** @internal */
 	constructor(
@@ -97,15 +110,115 @@ export class CollectionService<T = ApiRecord> {
 		collectionName: string,
 		authStore?: AuthStore,
 		realtime?: RealtimeService,
+		schema?: CollectionSchema,
 	) {
 		this.http = http;
 		this.collectionName = collectionName;
 		this.authStore = authStore;
 		this.realtime = realtime;
+		this.schema = schema;
 	}
 
 	private encodeId(id: string): string {
 		return encodeURIComponent(id);
+	}
+
+	// ── Field projection (`.select`) ──
+
+	/**
+	 * Project list/read responses to the given fields (PocketBase `fields`
+	 * param). Field names are type-checked when this service is typed
+	 * (codegen / `typed<T>()`).
+	 *
+	 * Returns a derived service — the original is untouched.
+	 *
+	 * @example
+	 * ```ts
+	 * const t = await client.collection("posts").select("id", "title").getList();
+	 * // GET /api/posts?fields=id,title
+	 *
+	 * // All visible fields (hidden fields are excluded server-side)
+	 * const all = await client.collection("posts").select("*").getList();
+	 * // GET /api/posts?fields=id,title,published,… (schema known)
+	 * ```
+	 *
+	 * When no schema is known, the default (no `select()` call) sends no
+	 * `fields` param — the server returns every non-password field.
+	 * Pass `select("*")` to restore the default after a projection.
+	 */
+	select<K extends FieldKey<T> | "*">(...fields: K[]): CollectionService<T> {
+		const preset = fields.length === 0 ? "*" : fields.join(",");
+		const derived = new CollectionService<T>(
+			this.http,
+			this.collectionName,
+			this.authStore,
+			this.realtime,
+			this.schema,
+		);
+		derived.fieldsPreset = preset;
+		if (this.schema && preset !== "*") {
+			const known = new Set(this.schema.fields?.map((f) => f.name) ?? []);
+			for (const f of fields) {
+				if (!known.has(f)) {
+					console.warn(
+						`[lazypock] select("${f}"): unknown field on collection "${this.collectionName}"`,
+					);
+				}
+			}
+		}
+		return derived;
+	}
+
+	/**
+	 * Fields to send with reads:
+	 * 1. explicit `options.fields` (caller wins)
+	 * 2. `select()` preset
+	 * 3. schema default — all visible (non-hidden, non-system) fields
+	 */
+	private effectiveFields(optionsFields?: string): string | undefined {
+		if (optionsFields !== undefined) return optionsFields;
+		if (this.fieldsPreset !== undefined) {
+			if (this.fieldsPreset === "*") {
+				return this.visibleFields();
+			}
+			return this.fieldsPreset;
+		}
+		return this.visibleFields();
+	}
+
+	/**
+	 * All non-hidden, non-system, non-password field names from the schema.
+	 * `undefined` when no schema is available (server decides).
+	 */
+	visibleFields(): string | undefined {
+		if (!this.schema?.fields) return undefined;
+		const visible = this.schema.fields
+			.filter(
+				(f) =>
+					!f.hidden &&
+					f.type !== "password" &&
+					f.type !== "autodate",
+			)
+			.map((f) => f.name);
+		return visible.length > 0 ? visible.join(",") : undefined;
+	}
+
+	/** Warn once when an expand field is not a relation (schema known). */
+	private validateExpand(expand: string | undefined): void {
+		if (!expand || !this.schema?.fields) return;
+		const relations = new Set(
+			this.schema.fields
+				.filter((f) => f.type === "relation")
+				.map((f) => f.name),
+		);
+		for (const f of expand.split(",")) {
+			const name = f.trim();
+			if (name && !relations.has(name)) {
+				console.warn(
+					`[lazypock] expand("${name}"): field is not a relation on collection "${this.collectionName}"`,
+				);
+			}
+		}
 	}
 
 	/**
@@ -118,7 +231,7 @@ export class CollectionService<T = ApiRecord> {
 	getList<T2 = T>(
 		page = 1,
 		perPage = 30,
-		options?: Record<string, unknown> & RequestOptions,
+		options?: ListOptions<T> & RequestOptions,
 	): Promise<ListResult<T2> | null> {
 		const {
 			requestKey,
@@ -131,6 +244,15 @@ export class CollectionService<T = ApiRecord> {
 			params,
 			...queryParams
 		} = options ?? {};
+		// Resolve the effective `fields` projection (select() preset or schema
+		// default) unless the caller passed an explicit `fields`.
+		const fields = this.effectiveFields(queryParams.fields as string | undefined);
+		if (fields !== undefined && queryParams.fields === undefined) {
+			queryParams.fields = fields;
+		}
+		if (typeof queryParams.expand === "string") {
+			this.validateExpand(queryParams.expand);
+		}
 		const qs = new URLSearchParams(
 			Object.fromEntries(
 				Object.entries({
@@ -162,7 +284,7 @@ export class CollectionService<T = ApiRecord> {
 	 * @param options Query params (`sort`, `filter`, `batch`, etc.) + request options.
 	 */
 	async getFullList<T2 = T>(
-		options?: Record<string, unknown> & RequestOptions,
+		options?: ListOptions<T> & RequestOptions,
 	): Promise<Array<T2>> {
 		const { batch = 1000, ...rest } = options ?? {};
 
@@ -186,7 +308,7 @@ export class CollectionService<T = ApiRecord> {
 					...rest,
 					requestKey: effectiveKey,
 					singleFlight: true,
-				} as Record<string, unknown> & RequestOptions,
+				} as ListOptions<T> & RequestOptions,
 			);
 			if (!res || !res.items || res.items.length === 0) break;
 			items.push(...(res.items as T2[]));
@@ -203,8 +325,8 @@ export class CollectionService<T = ApiRecord> {
 	 * @param options Optional request options.
 	 */
 	async getFirstListItem<T2 = T>(
-		filter: string,
-		options?: RequestOptions,
+		filter: FilterString<T>,
+		options?: ListOptions<T> & RequestOptions,
 	): Promise<T2 | null> {
 		const res = await this.getList<T2>(1, 1, {
 			...options,
@@ -218,9 +340,21 @@ export class CollectionService<T = ApiRecord> {
 	 * @param id Record ID.
 	 * @param options Optional request options.
 	 */
-	getOne(id: string, options?: RequestOptions): Promise<T | null> {
+	getOne(id: string, options?: ReadOptions<T> & RequestOptions): Promise<T | null> {
+		const fields = this.effectiveFields(options?.fields);
+		if (typeof options?.expand === "string") {
+			this.validateExpand(options.expand);
+		}
+		const qs = new URLSearchParams();
+		if (fields !== undefined) qs.set("fields", fields);
+		if (typeof options?.expand === "string") qs.set("expand", options.expand);
+		const qsStr = qs.toString();
 		return this.http.get<T>(
-			"/" + this.encodeId(this.collectionName) + "/" + this.encodeId(id),
+			"/" +
+				this.encodeId(this.collectionName) +
+				"/" +
+				this.encodeId(id) +
+				(qsStr ? "?" + qsStr : ""),
 			options,
 		);
 	}
@@ -316,6 +450,23 @@ export class CollectionService<T = ApiRecord> {
 	 */
 	typed<TRecord = ApiRecord>(): CollectionService<TRecord> {
 		return this as unknown as CollectionService<TRecord>;
+	}
+
+	/**
+	 * Explicitly bind a schema for this service (overrides the client-level
+	 * `types.schemas`). Enables schema-aware defaults: hidden fields are
+	 * excluded from responses, select/expand are validated.
+	 */
+	withSchema(schema: CollectionSchema): CollectionService<T> {
+		const derived = new CollectionService<T>(
+			this.http,
+			this.collectionName,
+			this.authStore,
+			this.realtime,
+			schema,
+		);
+		derived.fieldsPreset = this.fieldsPreset;
+		return derived;
 	}
 
 	// ── Realtime Subscriptions (PocketBase-style) ──

@@ -19,6 +19,13 @@ import {
 	type UpdateData,
 	type SystemFields,
 	type RequestOptions,
+	type ListOptions,
+	type ReadOptions,
+	type FilterString,
+	type SortString,
+	type ExpandString,
+	type FilterOp,
+	type FieldKey,
 } from "./types";
 import { RealtimeService, wsUrlFromBaseUrl } from "./realtime";
 import {
@@ -64,6 +71,14 @@ export type {
 	FileRecord,
 	CollectionSchema,
 	SchemaField,
+	// schema-driven query typing
+	ListOptions,
+	ReadOptions,
+	FilterString,
+	SortString,
+	ExpandString,
+	FilterOp,
+	FieldKey,
 };
 
 /** Options for constructing a {@link LazypockClient}. */
@@ -145,7 +160,7 @@ export class LazypockClient {
 	 * @param name The collection name.
 	 * @returns A {@link CollectionService} instance.
 	 */
-	collection(name: string): CollectionService<unknown> {
+	collection(name: string, schema?: CollectionSchema): CollectionService<unknown> {
 		let svc = this.collectionCache.get(name);
 		if (!svc) {
 			svc = new CollectionService(
@@ -153,6 +168,8 @@ export class LazypockClient {
 				name,
 				this.authStore,
 				this.realtime,
+				// Prefer the explicit schema, then the client-level `types.schemas`.
+				schema ?? this.schemaByName?.get(name),
 			);
 			this.collectionCache.set(name, svc);
 		}

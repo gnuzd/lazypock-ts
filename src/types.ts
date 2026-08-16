@@ -118,3 +118,107 @@ export class ApiError extends Error {
 		this.isAbort = isAbort;
 	}
 }
+
+// ── Schema-driven query typing ─────────────────────────
+// Template-literal helpers that turn a concrete record shape `T` (e.g. a
+// codegen-generated interface) into validated/suggestable query strings:
+//   - select("title", "published")          → field names checked
+//   - getList(1, 20, { sort: "-created" })   → "created" suggested
+//   - getList(1, 20, { filter: "title ~ 'x'" }) → field + operator suggested
+//   - getList(1, 20, { expand: "author" })   → field suggested (schema-checked at runtime)
+// When `T` is the untyped {@link ApiRecord}, every helper degrades to `string`.
+
+/**
+ * String keys of a record shape (excludes methods/symbols).
+ * Falls back to `string` when `T` has no known keys (e.g. `unknown`), so
+ * untyped services accept any field name.
+ */
+export type FieldKey<T> = Extract<keyof T, string> extends never
+	? string
+	: Extract<keyof T, string>;
+
+/** Valid filter operators, matching the backend FilterCompiler. */
+export type FilterOp =
+	| "="
+	| "!="
+	| "~"
+	| "!~"
+	| ">"
+	| ">="
+	| "<"
+	| "<=";
+
+/** One `field op value` clause. */
+type FilterClause<T> = `${FieldKey<T>} ${FilterOp} ${string}`;
+
+/**
+ * Type-checked filter expression (PocketBase syntax).
+ *
+ * ```ts
+ * getList(1, 20, { filter: "title ~ 'x' && published = true" })
+ * getList(1, 20, { filter: "(title = 'a' || title = 'b')" })
+ * ```
+ *
+ * The first clause's field name + operator are validated; the rest of the
+ * expression (values, `&&`/`||`, parens, `!`) is free-form.
+ */
+export type FilterString<T> =
+	| FilterClause<T>
+	| `${FilterClause<T>}${string}`;
+
+/** A single `[+|-]field` sort token. */
+type SortField<T> = `${"" | "-" | "+"}${FieldKey<T>}`;
+
+/**
+ * Type-checked sort string: `field`, `-field` (desc), `+field`, or
+ * comma-separated combinations (e.g. `"-created,title"`).
+ */
+export type SortString<T> = SortField<T> | `${SortField<T>},${string}`;
+
+/**
+ * Type-checked expand string: comma-separated relation field names
+ * (e.g. `"author"` or `"author,category"`). Non-relation fields are
+ * warned about at runtime when a schema is available.
+ */
+export type ExpandString<T> = FieldKey<T> | `${FieldKey<T>},${string}`;
+
+/**
+ * Query options for list/read operations, typed against a record shape `T`.
+ *
+ * `filter`, `sort`, `expand` and `fields` are recognized; any other key is
+ * passed through as a raw query parameter (PocketBase-compatible).
+ */
+export interface ListOptions<T = ApiRecord> {
+	/**
+	 * PocketBase filter expression. Field names + operators are type-checked
+	 * when `T` is a concrete shape.
+	 */
+	filter?: FilterString<T>;
+	/**
+	 * Sort field(s): `field`, `-field` (descending), comma-separated.
+	 */
+	sort?: SortString<T>;
+	/**
+	 * Comma-separated relation field names to expand.
+	 */
+	expand?: ExpandString<T>;
+	/**
+	 * Explicit field projection (overrides {@link CollectionService.select}).
+	 */
+	fields?: string;
+	/**
+	 * Raw query parameters — any other key is passed through verbatim.
+	 */
+	[key: string]: unknown;
+}
+
+/**
+ * Options for single-record reads (`getOne`): expand + explicit fields.
+ */
+export interface ReadOptions<T = ApiRecord> {
+	/** Comma-separated relation field names to expand. */
+	expand?: ExpandString<T>;
+	/** Explicit field projection (overrides {@link CollectionService.select}). */
+	fields?: string;
+}
+
