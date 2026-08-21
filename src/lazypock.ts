@@ -120,6 +120,14 @@ export interface LazypockClientOptions {
 export class LazypockClient {
 	readonly http: HttpClient;
 	readonly authStore: AuthStore;
+	/**
+	 * Resolves once persisted auth state has been loaded from storage.
+	 * The client auto-initializes its auth store on construction, so a
+	 * previously persisted token is ready immediately (no manual
+	 * `authStore.init()` needed). Await this only if you must gate on
+	 * the restored session.
+	 */
+	readonly authReady: Promise<void>;
 	readonly realtime: RealtimeService;
 	readonly collections: CollectionsService;
 	readonly files: FilesService;
@@ -134,6 +142,12 @@ export class LazypockClient {
 		const baseUrl = options.baseUrl.replace(/\/+$/, "");
 		this.authStore =
 			options.authStore ?? new AuthStore(options.storage ?? memoryStorage);
+		// Auto-init the auth store so persisted tokens are restored without a
+		// manual `await client.authStore.init()`. A caller-provided store is
+		// left untouched — it owns its own initialization lifecycle.
+		this.authReady = options.authStore
+			? Promise.resolve()
+			: this.authStore.init();
 		this.http = new HttpClient(baseUrl, this.authStore);
 		this.realtime = options.realtime ?? new RealtimeService();
 		// Cache the socket URL so collection-level subscribe() can auto-connect.

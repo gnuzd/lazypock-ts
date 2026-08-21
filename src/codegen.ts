@@ -149,10 +149,13 @@ export function createClient(options: LazypockClientOptions): TypedClient {
 }
 
 export class TypedClient extends LazypockClient {
-  override collection<T extends string>(name: T): T extends keyof LazypockCollections
-    ? CollectionService<LazypockCollections[T]>
-    : CollectionService<unknown> {
-    return super.collection(name) as T extends keyof LazypockCollections ? CollectionService<LazypockCollections[T]> : CollectionService<unknown>;
+  // K extends keyof LazypockCollections (rather than a generic string with a
+  // conditional return) so the IDE suggests collection names and unknown names
+  // are rejected at compile time:
+  //   client.collection("posts")  // suggested + typed
+  //   client.collection("nope")   // TS error
+  override collection<K extends keyof LazypockCollections>(name: K): CollectionService<LazypockCollections[K]> {
+    return super.collection(name) as CollectionService<LazypockCollections[K]>;
   }
 }
 `);
