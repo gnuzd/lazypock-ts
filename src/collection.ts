@@ -99,8 +99,9 @@ export class CollectionService<T = ApiRecord> {
 	private schema?: CollectionSchema;
 	/**
 	 * Active field projection from {@link select}. `"*"` (or unset) means
-	 * "all visible (non-hidden) fields" — resolved against the schema when
-	 * one is available, otherwise left to the server.
+	 * "all visible (non-hidden) fields plus the implicit system keys" —
+	 * resolved against the schema when one is available, otherwise left to
+	 * the server.
 	 */
 	private fieldsPreset?: string;
 
@@ -137,9 +138,10 @@ export class CollectionService<T = ApiRecord> {
 	 * const t = await client.collection("posts").select("id", "title").getList();
 	 * // GET /api/posts?fields=id,title
 	 *
-	 * // All visible fields (hidden fields are excluded server-side)
+	 * // All visible fields (implicit system keys id/created/updated/… are
+	 * // kept; hidden fields are excluded via the projection)
 	 * const all = await client.collection("posts").select("*").getList();
-	 * // GET /api/posts?fields=id,title,published,… (schema known)
+	 * // GET /api/posts?fields=id,created,updated,collectionId,collectionName,title,published,… (schema known)
 	 * ```
 	 *
 	 * When no schema is known, the default (no `select()` call) sends no
@@ -173,7 +175,8 @@ export class CollectionService<T = ApiRecord> {
 	 * Fields to send with reads:
 	 * 1. explicit `options.fields` (caller wins)
 	 * 2. `select()` preset
-	 * 3. schema default — all visible (non-hidden, non-system) fields
+	 * 3. schema default — all visible (non-hidden) fields plus the implicit
+	 *    system keys (`id`, `created`, `updated`, `collectionId`, `collectionName`)
 	 */
 	private effectiveFields(optionsFields?: string): string | undefined {
 		if (optionsFields !== undefined) return optionsFields;
@@ -187,8 +190,18 @@ export class CollectionService<T = ApiRecord> {
 	}
 
 	/**
-	 * All non-hidden, non-system, non-password field names from the schema.
-	 * `undefined` when no schema is available (server decides).
+	 * All non-hidden, non-password, non-autodate field names from the schema,
+	 * prefixed with the implicit system keys that are part of every record
+	 * (`id`, `created`, `updated`, `collectionId`, `collectionName`).
+	 *
+	 * The system keys never appear in the schema (they are implied for every
+	 * collection) but MUST be listed explicitly when projecting — the server
+	 * applies strict projection, so unrequested fields are dropped. Without
+	 * them, `getList`/`getOne` responses lose `id` (and `created`/`updated`),
+	 * breaking selection, edits, and relation references.
+	 *
+	 * `undefined` when no schema fields are available (server decides — its
+	 * default returns every non-password field, including the system keys).
 	 */
 	visibleFields(): string | undefined {
 		if (!this.schema?.fields) return undefined;
@@ -200,7 +213,18 @@ export class CollectionService<T = ApiRecord> {
 					f.type !== "autodate",
 			)
 			.map((f) => f.name);
-		return visible.length > 0 ? visible.join(",") : undefined;
+		if (visible.length === 0) return undefined;
+		// Dedupe in case a schema ever names a field after a system key.
+		return [
+			...new Set([
+				"id",
+				"created",
+				"updated",
+				"collectionId",
+				"collectionName",
+				...visible,
+			]),
+		].join(",");
 	}
 
 	/** Warn once when an expand field is not a relation (schema known). */
