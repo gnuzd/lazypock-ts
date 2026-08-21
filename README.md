@@ -167,6 +167,27 @@ When a schema is known (via `types.schemas` or codegen), hidden fields are
 **not returned by the server**: every read sends `fields=<visible fields>` by
 default, and selecting an unknown field logs a warning.
 
+#### Creating records in auth collections (write-only `password`)
+
+Password fields are write-only: they are never returned by the server and are
+omitted from the generated **read model** (`UsersRecord`). But they **are** part
+of the generated **create data** (`UsersCreateData`), so creating a user is fully
+type-safe — including when the password field is marked **hidden** in the
+collection schema:
+
+```typescript
+await client.collection('users').create({
+  email: 'ada@example.com',
+  password: 'correct-horse-battery', // ✓ typed — write-only, never returned
+});
+
+await client.collection('users').update('rec_abc', { password: 'new-pw' }); // ✓
+```
+
+The server bcrypt-hashes the value and strips it from every response; `create()`
+and `update()` on auth collections accept the collection's `*CreateData` shape,
+so unknown fields are still rejected at compile time.
+
 #### `filter` / `sort` / `expand` — type-checked suggestions
 
 With a typed service, the query options validate field names (and filter

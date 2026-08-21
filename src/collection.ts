@@ -90,7 +90,7 @@ function normalizeAction(
  *
  * @typeParam T — The record shape for this collection. Defaults to {@link ApiRecord}.
  */
-export class CollectionService<T = ApiRecord> {
+export class CollectionService<T = ApiRecord, TData = never> {
 	private http: HttpClient;
 	private collectionName: string;
 	private authStore?: AuthStore;
@@ -148,9 +148,9 @@ export class CollectionService<T = ApiRecord> {
 	 * `fields` param — the server returns every non-password field.
 	 * Pass `select("*")` to restore the default after a projection.
 	 */
-	select<K extends FieldKey<T> | "*">(...fields: K[]): CollectionService<T> {
+	select<K extends FieldKey<T> | "*">(...fields: K[]): CollectionService<T, TData> {
 		const preset = fields.length === 0 ? "*" : fields.join(",");
-		const derived = new CollectionService<T>(
+		const derived = new CollectionService<T, TData>(
 			this.http,
 			this.collectionName,
 			this.authStore,
@@ -390,7 +390,11 @@ export class CollectionService<T = ApiRecord> {
 	 * @param options Optional request options.
 	 */
 	create(
-		data: T extends ApiRecord ? Record<string, unknown> : CreateData<T>,
+		data: [TData] extends [never]
+			? T extends ApiRecord
+				? Record<string, unknown>
+				: CreateData<T>
+			: TData,
 		options?: RequestOptions,
 	): Promise<T | null> {
 		return this.http.post<T>(
@@ -409,7 +413,11 @@ export class CollectionService<T = ApiRecord> {
 	 */
 	update(
 		id: string,
-		data: T extends ApiRecord ? Record<string, unknown> : UpdateData<T>,
+		data: [TData] extends [never]
+			? T extends ApiRecord
+				? Record<string, unknown>
+				: UpdateData<T>
+			: Partial<TData>,
 		options?: RequestOptions,
 	): Promise<T | null> {
 		return this.http.patch<T>(
@@ -481,8 +489,8 @@ export class CollectionService<T = ApiRecord> {
 	 * `types.schemas`). Enables schema-aware defaults: hidden fields are
 	 * excluded from responses, select/expand are validated.
 	 */
-	withSchema(schema: CollectionSchema): CollectionService<T> {
-		const derived = new CollectionService<T>(
+	withSchema(schema: CollectionSchema): CollectionService<T, TData> {
+		const derived = new CollectionService<T, TData>(
 			this.http,
 			this.collectionName,
 			this.authStore,

@@ -117,7 +117,7 @@ const mockCollections = [
 				type: "select",
 				options: { values: ["admin", "member"] },
 			},
-			{ name: "password", type: "password" },
+			{ name: "password", type: "password", hidden: true },
 		],
 	},
 	{
@@ -149,9 +149,38 @@ check(
 	source.includes("export interface BlogPostsRecord"),
 	true,
 );
+const usersRecordBlock =
+	source.match(/export interface UsersRecord\b[\s\S]*?\n}/)?.[0] ?? "";
 check(
-	"password omitted from record interface",
-	!source.includes('"password"?:') && !source.includes('"password": never'),
+	"password omitted from record interface (read model)",
+	!usersRecordBlock.includes("password"),
+	true,
+);
+check(
+	"password writable in create data even when hidden (write-only)",
+	source.includes('"password"?: string;'),
+	true,
+);
+check(
+	"create data interface generated",
+	source.includes("export interface UsersCreateData"),
+	true,
+);
+check(
+	"base collection create data generated",
+	source.includes("export interface BlogPostsCreateData"),
+	true,
+);
+check(
+	"create data map generated",
+	source.includes('"users": UsersCreateData;'),
+	true,
+);
+check(
+	"typed collection binds create data",
+	source.includes(
+		"CollectionService<LazypockCollections[K], LazypockCreateData[K]>",
+	),
 	true,
 );
 check("select union in output", source.includes('"admin" | "member"'), true);
