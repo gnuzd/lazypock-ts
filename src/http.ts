@@ -2,7 +2,7 @@
 // Only relies on globalThis.fetch — works in browser, React Native, and Node 18+
 
 import { ApiError, type Method, type RequestOptions } from "./types";
-import type { AuthStore } from "./auth";
+import type { AuthModel, AuthStore } from "./auth";
 
 /**
  * Low-level HTTP client wrapping `fetch` with automatic auth token injection.
@@ -74,10 +74,10 @@ export class HttpClient {
 			}
 			const data = (await res.json()) as Record<string, unknown>;
 			if (data && typeof data.token === "string") {
-				this.authStore.set(
-					data.token,
-					(data.record as Record<string, unknown> as any) ?? null,
-				);
+				const record = data["record"];
+				const model: AuthModel | null =
+					record && typeof record === "object" ? (record as AuthModel) : null;
+				this.authStore.set(data.token, model);
 				return data as { token: string; record: Record<string, unknown> };
 			}
 			return null;
@@ -300,8 +300,22 @@ export class HttpClient {
 			if (bodyText) {
 				data = JSON.parse(bodyText) as Record<string, unknown>;
 			}
-		} catch {
-			// Not JSON — keep data as empty object
+		} catch (err) {
+			// An abort that lands while the body is streaming (auto-cancelled
+			// duplicate, manual cancel, or external signal) means the whole
+			// request was cancelled — surface it as an abort error instead of
+			// silently returning an empty object, which callers would treat as
+			// a successful-but-empty response (e.g. a list request would clear
+			// the current rows).
+			if (isAbortError(err)) {
+				throw new ApiError(
+					"The request was aborted (most likely auto-cancelled by a newer request with the same requestKey)",
+					{},
+					0,
+					true,
+				);
+			}
+			// Not JSON / read failure — keep data as empty object
 		}
 
 		if (!res!.ok) {

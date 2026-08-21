@@ -183,8 +183,19 @@ export class TypedClient extends LazypockClient {
   //
   // create()/update() take the collection's *CreateData — the read model
   // omits password/hidden fields, but the write model carries them.
-  override collection<K extends keyof LazypockCollections>(name: K): CollectionService<LazypockCollections[K], LazypockCreateData[K]> {
-    return super.collection(name) as CollectionService<LazypockCollections[K], LazypockCreateData[K]>;
+  // T extends string (rather than keyof LazypockCollections) with a conditional
+  // return type, so the IDE suggests collection names AND unknown/dynamic names
+  // still resolve to the untyped service — a studio that manages
+  // user-created collections must be able to call collection(someString).
+  //
+  // create()/update() take the collection's *CreateData — the read model
+  // omits password/hidden fields, but the write model carries them.
+  override collection<T extends string>(name: T): T extends keyof LazypockCollections
+    ? CollectionService<LazypockCollections[T], LazypockCreateData[T]>
+    : CollectionService<unknown> {
+    return super.collection(name) as T extends keyof LazypockCollections
+      ? CollectionService<LazypockCollections[T], LazypockCreateData[T]>
+      : CollectionService<unknown>;
   }
 }
 `);
@@ -221,12 +232,22 @@ function memberLine(f: SchemaField): string {
  * Unlike the read model, create/update data includes password fields (sent as
  * plain strings — the server hashes them) and hidden fields: the server
  * accepts them on write and never returns them in responses.
+ *
+ * A field is only marked required when it actually needs a client value:
+ * fields with a server-side default (`options.defaultValue`) and the auth
+ * system fields `verified` / `emailVisibility` (the server defaults them to
+ * false/true even though the snapshot doesn't carry `defaultValue`) stay
+ * optional, so `create({ email, password_hash })` typechecks without forcing
+ * callers to send values the server would fill in anyway.
  */
 function createDataMemberLine(f: SchemaField): string {
 	// Autodate columns are server-managed; never writable.
 	if (f.type === "autodate") return "";
 	const key = fieldKey(f.name);
-	const req = f.required ? "" : "?";
+	const serverDefaulted =
+		f.options?.defaultValue !== undefined ||
+		(f.system && (f.name === "verified" || f.name === "emailVisibility"));
+	const req = f.required && !serverDefaulted ? "" : "?";
 	const type = f.type === "password" ? "string" : fieldTypeScriptType(f);
 	if (type === "never") return "";
 	return `  ${JSON.stringify(key)}${req}: ${type};`;
