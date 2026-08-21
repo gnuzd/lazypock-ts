@@ -27,8 +27,6 @@ export function fieldKey(name: string): string {
 	return name.replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
-
-
 /**
  * Generate the full TypeScript source for the typed SDK module.
  *

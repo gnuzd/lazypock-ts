@@ -332,11 +332,7 @@ globalThis.WebSocket = class {
 		"function",
 	);
 	const unsubReg = reg.subscribe((e) => e);
-	check(
-		"collections.subscribe returns a function",
-		typeof unsubReg,
-		"function",
-	);
+	check("collections.subscribe returns a function", typeof unsubReg, "function");
 	unsubReg();
 
 	check(
@@ -479,11 +475,7 @@ await (async () => {
 		pool[1].resolve(ok200);
 		const ra = await a;
 		const rb = await b;
-		check(
-			"requestKey null keeps both",
-			ra?.ok === true && rb?.ok === true,
-			true,
-		);
+		check("requestKey null keeps both", ra?.ok === true && rb?.ok === true, true);
 	}
 
 	// ── 4. cancelAllRequests aborts in-flight ──
@@ -620,7 +612,9 @@ await (async () => {
 	const c3 = new LazypockClient({ baseUrl: "http://x/api" });
 	const multi = await c3.collection("multi").getFullList({ fetch: pageFetch });
 	check("getFullList dedup: multi-page returns 4 items", multi?.length, 4);
-	const pageReqs = [...counters.keys()].filter((k) => k.includes("/multi?")).length;
+	const pageReqs = [...counters.keys()].filter((k) =>
+		k.includes("/multi?"),
+	).length;
 	check("getFullList dedup: multi-page = 2 page requests", pageReqs, 2);
 })();
 
@@ -666,7 +660,11 @@ await (async () => {
 			.collection("posts")
 			.select("id", "title")
 			.getList(1, 20, { fetch: fetchMock });
-		check("select() adds fields=id,title", lastUrl().includes("fields=id%2Ctitle"), true);
+		check(
+			"select() adds fields=id,title",
+			lastUrl().includes("fields=id%2Ctitle"),
+			true,
+		);
 	}
 
 	// 2. select("*") + schema → system keys + visible fields (hidden excluded)
@@ -715,7 +713,11 @@ await (async () => {
 			.collection("posts")
 			.select("id", "title")
 			.getList(1, 20, { fetch: fetchMock, fields: "title" });
-		check("options.fields overrides select()", lastUrl().includes("fields=title"), true);
+		check(
+			"options.fields overrides select()",
+			lastUrl().includes("fields=title"),
+			true,
+		);
 	}
 
 	// 6. getOne applies the preset too
@@ -725,7 +727,11 @@ await (async () => {
 			.collection("posts")
 			.select("id", "title")
 			.getOne("abc", { fetch: fetchMock });
-		check("select() applies to getOne", lastUrl().includes("fields=id%2Ctitle"), true);
+		check(
+			"select() applies to getOne",
+			lastUrl().includes("fields=id%2Ctitle"),
+			true,
+		);
 	}
 
 	// 7. select() returns a derived service — the original is untouched
@@ -734,9 +740,17 @@ await (async () => {
 		const svc = c.collection("posts");
 		const projected = svc.select("title");
 		await svc.getList(1, 20, { fetch: fetchMock });
-		check("original service unaffected by select()", !lastUrl().includes("fields="), true);
+		check(
+			"original service unaffected by select()",
+			!lastUrl().includes("fields="),
+			true,
+		);
 		await projected.getList(1, 20, { fetch: fetchMock });
-		check("derived service sends fields=title", lastUrl().includes("fields=title"), true);
+		check(
+			"derived service sends fields=title",
+			lastUrl().includes("fields=title"),
+			true,
+		);
 	}
 
 	// 8. expand validation warns on non-relation fields (schema known)
@@ -754,7 +768,9 @@ await (async () => {
 		console.warn = origWarn;
 		check(
 			"expand(non-relation) warns when schema known",
-			warns.some((w) => w.includes("expand(\"title\")") && w.includes("not a relation")),
+			warns.some(
+				(w) => w.includes('expand("title")') && w.includes("not a relation"),
+			),
 			true,
 		);
 	}
