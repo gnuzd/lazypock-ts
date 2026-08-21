@@ -601,8 +601,8 @@ await (async () => {
 		});
 		await c.collection("posts").select("*").getList(1, 20, { fetch: fetchMock });
 		check(
-			"select(*) + schema → fields=visible (hidden excluded)",
-			lastUrl().includes("fields=title%2Cpublished%2Cauthor"),
+			"select(*) + schema → fields=visible (system fields included)",
+			lastUrl().includes("fields=id%2Ccreated%2Cupdated%2CcollectionId%2CcollectionName%2Ctitle%2Cpublished%2Cauthor"),
 			true,
 		);
 	}
@@ -615,8 +615,8 @@ await (async () => {
 		});
 		await c.collection("posts").getList(1, 20, { fetch: fetchMock });
 		check(
-			"no select() + schema → fields=visible by default",
-			lastUrl().includes("fields=title%2Cpublished%2Cauthor"),
+			"no select() + schema → fields=visible by default (system fields included)",
+			lastUrl().includes("fields=id%2Ccreated%2Cupdated%2CcollectionId%2CcollectionName%2Ctitle%2Cpublished%2Cauthor"),
 			true,
 		);
 	}

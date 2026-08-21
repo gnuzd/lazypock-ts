@@ -189,6 +189,11 @@ export class CollectionService<T = ApiRecord> {
 	/**
 	 * All non-hidden, non-system, non-password field names from the schema.
 	 * `undefined` when no schema is available (server decides).
+	 *
+	 * System fields (`id`, `created`, `updated`, `collectionId`, `collectionName`)
+	 * are ALWAYS included: the server's strict `fields` projection does NOT
+	 * implicitly include them, so omitting them would strip ids from records
+	 * and break update/delete/relation flows.
 	 */
 	visibleFields(): string | undefined {
 		if (!this.schema?.fields) return undefined;
@@ -200,7 +205,15 @@ export class CollectionService<T = ApiRecord> {
 					f.type !== "autodate",
 			)
 			.map((f) => f.name);
-		return visible.length > 0 ? visible.join(",") : undefined;
+		if (visible.length === 0) return undefined;
+		const systemFields = [
+			"id",
+			"created",
+			"updated",
+			"collectionId",
+			"collectionName",
+		];
+		return [...new Set([...systemFields, ...visible])].join(",");
 	}
 
 	/** Warn once when an expand field is not a relation (schema known). */
