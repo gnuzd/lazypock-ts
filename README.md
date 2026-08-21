@@ -531,6 +531,34 @@ const off = client.collection('public_feed').subscribe((e) => {
 });
 ```
 
+
+## Releasing (automatic)
+
+Releases are fully automatic via [release-please](https://github.com/googleapis/release-please):
+
+1. Push a feature/fix to `main` with a conventional commit message
+   (`fix(...)`, `feat(...)`, `chore(...)`). Release Please opens a
+   **release PR** — `chore(main): release vX.Y.Z` — with the version bump
+   and generated `CHANGELOG.md`.
+2. **Merge the release PR** (review it first — it's the human gate). That
+   merge creates the `vX.Y.Z` GitHub Release and tag, then the same workflow
+   run builds, typechecks, runs the smoke tests, and publishes the package
+   to npm.
+
+There is no manual `workflow_dispatch` step and no local `npm publish`.
+
+### Version selection
+
+- `fix(...)` commits → patch (`0.8.2` → `0.8.3`)
+- `feat(...)` commits → minor (`0.8.2` → `0.9.0`)
+- a `BREAKING CHANGE:` footer in any commit body → major (`0.8.2` → `1.0.0`)
+
+### One-time setup
+
+- Add an npm access token (Automation or Publish scope, from
+  <https://www.npmjs.com/settings/<you>/tokens>) as the repo secret
+  **`NPM_TOKEN`** under Settings → Secrets and variables → Actions.
+
 ## License
 
 [MIT](LICENSE) © 2024-2025 Chris Nguyen (gnuzd)
