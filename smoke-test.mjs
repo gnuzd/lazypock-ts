@@ -111,7 +111,15 @@ const mockCollections = [
 		type: "auth",
 		fields: [
 			{ name: "email", type: "email", required: true },
-			{ name: "verified", type: "bool" },
+			{ name: "password_hash", type: "password", required: true, system: true },
+			{ name: "verified", type: "bool", required: true, system: true },
+			{
+				name: "emailVisibility",
+				type: "bool",
+				required: true,
+				system: true,
+				options: { defaultValue: true },
+			},
 			{
 				name: "role",
 				type: "select",
@@ -179,7 +187,7 @@ check(
 check(
 	"typed collection binds create data",
 	source.includes(
-		"CollectionService<LazypockCollections[K], LazypockCreateData[K]>",
+		"CollectionService<LazypockCollections[T], LazypockCreateData[T]>",
 	),
 	true,
 );
@@ -188,6 +196,26 @@ check("relation→string", source.includes('"author"?: string;'), true);
 check("multi_select→array", source.includes('"tags"?: ("ts" | "js")[];'), true);
 check("required field no ?", source.includes('"title": string;'), true);
 check("optional bool has ?", source.includes('"published"?: boolean;'), true);
+check(
+	"password_hash required in create data (no server default)",
+	source.includes('"password_hash": string;'),
+	true,
+);
+check(
+	"verified optional in create data (server default false)",
+	source.includes('"verified"?: boolean;'),
+	true,
+);
+check(
+	"emailVisibility optional in create data (defaultValue true)",
+	source.includes('"emailVisibility"?: boolean;'),
+	true,
+);
+check(
+	"email required in create data",
+	source.includes('"email": string;'),
+	true,
+);
 check(
 	"LazypockCollections map",
 	source.includes('"blog_posts": BlogPostsRecord;'),
@@ -383,6 +411,35 @@ await (async () => {
 		check("first duplicate isAbort === true", firstErr?.isAbort, true);
 	}
 
+	// ── 1b. abort landing during body read must throw, not return {} ──
+	{
+		const h = new HttpClient("http://x/api", store);
+		// Response whose headers arrived but the body read is aborted
+		// (auto-cancel fires mid-stream). Must reject as an abort error —
+		// silently resolving {} would make list callers clear their rows.
+		const abortedBodyFetch = async (_url, init) => {
+			const response = {
+				ok: true,
+				status: 200,
+				text: async () => {
+					throw new DOMException("Aborted", "AbortError");
+				},
+			};
+			init.signal?.addEventListener("abort", () => {});
+			return response;
+		};
+		try {
+			await h.request("GET", "/posts", undefined, {
+				fetch: abortedBodyFetch,
+				requestKey: null,
+			});
+			check("mid-body abort throws (not silent {})", false, true);
+		} catch (e) {
+			check("mid-body abort throws (not silent {})", true, true);
+			check("mid-body abort is isAbort", e?.isAbort, true);
+		}
+	}
+
 	// ── 2. requestKey override groups requests across paths ──
 	{
 		const h = new HttpClient("http://x/api", store);
@@ -474,7 +531,6 @@ await (async () => {
 // Different options must remain distinct.
 
 await (async () => {
-	const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 	const counters = new Map();
 	const fetchMock = async (url, init) => {
 		const signal = init?.signal;
@@ -573,15 +629,6 @@ await (async () => {
 // select("*")) all non-hidden fields are requested when a schema is known.
 
 await (async () => {
-	const store = {
-		token: "",
-		collectionName: null,
-		isExpired: false,
-		set() {},
-		setCollectionName() {},
-		clear() {},
-	};
-
 	// schema with a hidden field + a relation field
 	const postsSchema = {
 		name: "posts",
