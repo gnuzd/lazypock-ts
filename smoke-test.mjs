@@ -593,7 +593,7 @@ await (async () => {
 		check("select() adds fields=id,title", lastUrl().includes("fields=id%2Ctitle"), true);
 	}
 
-	// 2. select("*") + schema → visible fields (hidden excluded)
+	// 2. select("*") + schema → system keys + visible fields (hidden excluded)
 	{
 		const c = new LazypockClient({
 			baseUrl: "http://x/api",
@@ -601,13 +601,15 @@ await (async () => {
 		});
 		await c.collection("posts").select("*").getList(1, 20, { fetch: fetchMock });
 		check(
-			"select(*) + schema → fields=visible (hidden excluded)",
-			lastUrl().includes("fields=title%2Cpublished%2Cauthor"),
+			"select(*) + schema → fields=id,created,updated,… + visible (hidden excluded)",
+			lastUrl().includes(
+				"fields=id%2Ccreated%2Cupdated%2CcollectionId%2CcollectionName%2Ctitle%2Cpublished%2Cauthor",
+			),
 			true,
 		);
 	}
 
-	// 3. no select() + schema → same visible default
+	// 3. no select() + schema → same default (system keys + visible fields)
 	{
 		const c = new LazypockClient({
 			baseUrl: "http://x/api",
@@ -615,8 +617,10 @@ await (async () => {
 		});
 		await c.collection("posts").getList(1, 20, { fetch: fetchMock });
 		check(
-			"no select() + schema → fields=visible by default",
-			lastUrl().includes("fields=title%2Cpublished%2Cauthor"),
+			"no select() + schema → fields=id,created,updated,… + visible by default",
+			lastUrl().includes(
+				"fields=id%2Ccreated%2Cupdated%2CcollectionId%2CcollectionName%2Ctitle%2Cpublished%2Cauthor",
+			),
 			true,
 		);
 	}
