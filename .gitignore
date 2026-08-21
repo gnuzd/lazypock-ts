@@ -4,3 +4,7 @@ dist/
 
 # macOS
 .DS_Store
+
+.repowise
+.vscode
+.claude
