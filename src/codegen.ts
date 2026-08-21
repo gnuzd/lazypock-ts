@@ -85,6 +85,19 @@ export function generateTypes(
 				body,
 			})}`,
 		);
+
+		// Write-only create data: what `create()`/`update()` accept. This
+		// intentionally includes password fields (and hidden fields) that are
+		// excluded from the read model — the server accepts them on write,
+		// hashes passwords, and never returns them in responses.
+		const createLines = fields
+			.map((f) => createDataMemberLine(f))
+			.filter((l) => l !== "");
+		sections.push(
+			`export interface ${typeName}CreateData${renderInterface({
+				body: createLines.join("\n"),
+			})}`,
+		);
 	}
 
 	// Auth collection type
@@ -104,6 +117,15 @@ export function generateTypes(
 		.join("\n");
 	sections.push(`export interface LazypockCollections {
 ${mapEntries}
+}`);
+
+	// Create-data map — typed `create()`/`update()` payloads, including
+	// write-only password fields.
+	const createMapEntries = filtered
+		.map((c) => `  "${c.name}": ${collectionTypeName(c.name)}CreateData;`)
+		.join("\n");
+	sections.push(`export interface LazypockCreateData {
+${createMapEntries}
 }`);
 
 	// Runtime schema snapshot — lets the client exclude hidden fields by
@@ -135,6 +157,10 @@ ${schemaEntries}
  * Collection access is fully type-checked:
  *   client.collection("posts").create({ title: "x" }) // title must exist
  *
+ * For auth collections the generated *CreateData type includes the
+ * write-only password field, so creating a user is type-safe:
+ *   client.collection("users").create({ email, password }) // ✓
+ *
  * The schema snapshot is wired into the client automatically, so hidden
  * fields are excluded from responses and select/expand are validated.
  */
@@ -154,8 +180,11 @@ export class TypedClient extends LazypockClient {
   // are rejected at compile time:
   //   client.collection("posts")  // suggested + typed
   //   client.collection("nope")   // TS error
-  override collection<K extends keyof LazypockCollections>(name: K): CollectionService<LazypockCollections[K]> {
-    return super.collection(name) as CollectionService<LazypockCollections[K]>;
+  //
+  // create()/update() take the collection's *CreateData — the read model
+  // omits password/hidden fields, but the write model carries them.
+  override collection<K extends keyof LazypockCollections>(name: K): CollectionService<LazypockCollections[K], LazypockCreateData[K]> {
+    return super.collection(name) as CollectionService<LazypockCollections[K], LazypockCreateData[K]>;
   }
 }
 `);
@@ -182,6 +211,23 @@ function memberLine(f: SchemaField): string {
 	const req = f.required || f.type === "password" ? "" : "?";
 	const type = fieldTypeScriptType(f);
 	// `never` members (passwords) are omitted from read models.
+	if (type === "never") return "";
+	return `  ${JSON.stringify(key)}${req}: ${type};`;
+}
+
+/**
+ * Render a write-only create-data member for a field.
+ *
+ * Unlike the read model, create/update data includes password fields (sent as
+ * plain strings — the server hashes them) and hidden fields: the server
+ * accepts them on write and never returns them in responses.
+ */
+function createDataMemberLine(f: SchemaField): string {
+	// Autodate columns are server-managed; never writable.
+	if (f.type === "autodate") return "";
+	const key = fieldKey(f.name);
+	const req = f.required ? "" : "?";
+	const type = f.type === "password" ? "string" : fieldTypeScriptType(f);
 	if (type === "never") return "";
 	return `  ${JSON.stringify(key)}${req}: ${type};`;
 }
