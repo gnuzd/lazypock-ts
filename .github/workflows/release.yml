@@ -1,127 +1,77 @@
 name: Release
 
+# Automatic release pipeline (replaces the old manual workflow_dispatch).
+#
+# Flow (fully automatic after the NPM_TOKEN secret is configured):
+#   1. Every push to `main` runs release-please. If the commits since the last
+#      release include `fix:` / `feat:` / BREAKING CHANGE (conventional
+#      commits), it opens (or updates) a release PR — "chore(main): release
+#      vX.Y.Z" — with the version bump + CHANGELOG.md.
+#   2. Merging that release PR pushes the bump to `main`, release-please
+#      creates the GitHub Release + `vX.Y.Z` tag, and the publish job in this
+#      same run builds, tests, and publishes the package to npm.
+#
+# Requirements:
+#   - Repo secret `NPM_TOKEN`: an npm access token (Automation or Publish
+#     scope) for the package's publishing account. Add it under
+#     Settings → Secrets and variables → Actions.
+#   - Commit messages on `main` should follow conventional commits
+#     (e.g. `fix(sdk): ...`, `feat(sdk): ...`, `chore: ...`) so the next
+#     version is chosen correctly. `BREAKING CHANGE:` in the body bumps major.
+
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Semver version to release (e.g. 0.3.0)"
-        required: true
-        type: string
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  release:
-    name: Build & Release
+  release-please:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Release Please
+        id: release
+        uses: google-github-actions/release-please-action@v4
         with:
-          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release-type: node
+          package-name: lazypock
+
+      # ── Only runs when release-please just created a release (release PR
+      #    merged) — checkout the released code and publish it to npm. ──
+      - name: Checkout
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@v4
 
       - name: Setup Bun
+        if: ${{ steps.release.outputs.release_created }}
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Resolve version
-        id: version
-        run: |
-          VERSION="$VERSION_INPUT"
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Invalid version: $VERSION (expected semver like 0.3.0)" >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-        env:
-          VERSION_INPUT: ${{ github.event.inputs.version }}
-
-      - name: Install deps
+      - name: Install dependencies
+        if: ${{ steps.release.outputs.release_created }}
         run: bun install --frozen-lockfile
 
-      - name: Bump version in package.json
-        run: |
-          python3 - <<'PY'
-          import json, os
-          V = os.environ["VERSION"]
-          p = "package.json"
-          d = json.load(open(p))
-          d["version"] = V
-          json.dump(d, open(p, "w"), indent=2)
-          open(p, "a").write("\n")
-          PY
-          grep -n '"version"' package.json | head -1
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-
       - name: Typecheck
+        if: ${{ steps.release.outputs.release_created }}
         run: bun run typecheck
 
       - name: Smoke test (build + runtime + type-level)
+        if: ${{ steps.release.outputs.release_created }}
         run: bun run smoke
 
-      - name: Commit version bump and tag
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
+      - name: Configure npm auth
+        if: ${{ steps.release.outputs.release_created }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json bun.lock
-          git commit -m "chore: release v${VERSION}" --allow-empty
-          git tag "v${VERSION}"
-          git push origin main
-          git push origin "v${VERSION}"
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" \
+            > ~/.npmrc
 
-      - name: Prepare release asset
+      - name: Publish to npm
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm publish
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          tar -czf "lazypock-${VERSION}.tgz" dist
-          sha256sum "lazypock-${VERSION}.tgz" > checksums-sha256.txt
-
-      - name: Generate changelog
-        id: changelog
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: releases } = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 1,
-            });
-            const last = releases[0]?.tag_name;
-            const { data: commits } = await github.rest.repos.listCommits({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 50,
-            });
-            let cutoff = null;
-            if (last) {
-              const found = commits.find(
-                (c) => c.commit.message.includes(last)
-              );
-              if (found) cutoff = found.sha;
-            }
-            const items = [];
-            for (const c of commits) {
-              if (cutoff && c.sha === cutoff) break;
-              const msg = c.commit.message.split("\n")[0];
-              items.push(`- ${msg} (${c.sha.slice(0, 7)})`);
-            }
-            core.setOutput("body", items.join("\n"));
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: lazypock-ts v${{ steps.version.outputs.version }}
-          body: ${{ steps.changelog.outputs.body }}
-          files: |
-            lazypock-*.tgz
-            checksums-sha256.txt
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
