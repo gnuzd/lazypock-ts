@@ -6,6 +6,8 @@ export interface SchemaField {
 	id?: string;
 	name: string;
 	type: string;
+	/** For relation fields: the target collection id (server-resolved). */
+	collectionId?: string | null;
 	required?: boolean;
 	unique?: boolean;
 	options?: {
