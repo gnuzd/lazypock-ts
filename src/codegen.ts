@@ -90,9 +90,15 @@ export function generateTypes(
 		// intentionally includes password fields (and hidden fields) that are
 		// excluded from the read model — the server accepts them on write,
 		// hashes passwords, and never returns them in responses.
-		const createLines = fields
-			.map((f) => createDataMemberLine(f))
-			.filter((l) => l !== "");
+		const createLines: string[] = [];
+		const seenKeys = new Set<string>();
+		for (const f of fields) {
+			for (const { key, line } of createDataMemberLines(f)) {
+				if (seenKeys.has(key)) continue;
+				seenKeys.add(key);
+				createLines.push(line);
+			}
+		}
 		sections.push(
 			`export interface ${typeName}CreateData${renderInterface({
 				body: createLines.join("\n"),
@@ -227,28 +233,49 @@ function memberLine(f: SchemaField): string {
 }
 
 /**
- * Render a write-only create-data member for a field.
+ * Render the write-only create-data members for a field.
  *
  * Unlike the read model, create/update data includes password fields (sent as
  * plain strings — the server hashes them) and hidden fields: the server
  * accepts them on write and never returns them in responses.
  *
+ * Password fields are exposed under the canonical PocketBase API key
+ * `password` (the server accepts `password` for any single password field and
+ * hashes it into the backing column, e.g. `password_hash`), with the raw
+ * metadata name kept as a backward-compat alias.
+ *
  * A field is only marked required when it actually needs a client value:
  * fields with a server-side default (`options.defaultValue`) and the auth
  * system fields `verified` / `emailVisibility` (the server defaults them to
  * false/true even though the snapshot doesn't carry `defaultValue`) stay
- * optional, so `create({ email, password_hash })` typechecks without forcing
- * callers to send values the server would fill in anyway.
+ * optional, so `create({ email, password })` typechecks without forcing
+ * callers to send values the server would fill in anyway. Password fields
+ * are optional (accounts may exist without a password, e.g. OAuth-only).
  */
-function createDataMemberLine(f: SchemaField): string {
+function createDataMemberLines(
+	f: SchemaField,
+): { key: string; line: string }[] {
 	// Autodate columns are server-managed; never writable.
-	if (f.type === "autodate") return "";
-	const key = fieldKey(f.name);
+	if (f.type === "autodate") return [];
+	const rawName = fieldKey(f.name);
 	const serverDefaulted =
 		f.options?.defaultValue !== undefined ||
 		(f.system && (f.name === "verified" || f.name === "emailVisibility"));
 	const req = f.required && !serverDefaulted ? "" : "?";
 	const type = f.type === "password" ? "string" : fieldTypeScriptType(f);
-	if (type === "never") return "";
-	return `  ${JSON.stringify(key)}${req}: ${type};`;
+	if (type === "never") return [];
+
+	const members = [
+		{ key: rawName, line: `  ${JSON.stringify(rawName)}${req}: ${type};` },
+	];
+	// Write-only password: canonical key is `password` (PocketBase parity) —
+	// the server accepts `password` for any single password field and hashes
+	// it. The raw metadata name (e.g. `password_hash`) stays as a compat alias.
+	if (f.type === "password" && rawName !== "password") {
+		members.unshift({
+			key: "password",
+			line: `  ${JSON.stringify("password")}${req}: ${type};`,
+		});
+	}
+	return members;
 }

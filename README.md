@@ -31,6 +31,14 @@ const all = await client.collection('posts').getFullList();
 // Create a record
 const newPost = await client.collection('posts').create({ title: 'Hello', published: true });
 
+// Auth collections — create a user (password is optional + write-only)
+const user = await client.collection('users').create({
+  email: 'ada@example.com',
+  password: 'correct-horse-battery', // hashed server-side, never returned
+});
+const session = await client.authWithPassword('users', 'ada@example.com', 'correct-horse-battery');
+// session.token — stored in client.authStore for subsequent requests
+
 // File upload
 const file = await client.files.upload(fileInput.files[0]);
 
@@ -169,24 +177,50 @@ default, and selecting an unknown field logs a warning.
 
 #### Creating records in auth collections (write-only `password`)
 
-Password fields are write-only: they are never returned by the server and are
-omitted from the generated **read model** (`UsersRecord`). But they **are** part
-of the generated **create data** (`UsersCreateData`), so creating a user is fully
-type-safe — including when the password field is marked **hidden** in the
-collection schema:
+Collections can be **base** (`type: "base"`, plain records) or **auth**
+(`type: "auth"`, accounts — the built-in `users` collection is an auth
+collection). Auth collections have an email field and a write-only password
+field, plus system fields (`verified`, `emailVisibility`).
+
+The `password` field is **write-only**:
+
+- **Hidden** — never returned by the server, never shown in the Studio record
+  browser, and omitted from the generated **read model** (`UsersRecord`).
+- **Optional** — accounts may exist without a password (e.g. OAuth-only
+  users or invite flows), so `create()` typechecks without it.
+- Hashed — the server bcrypt-hashes the value before storing it (as
+  `password_hash` in the database) and strips it from every response.
+
+Because of this, `password` **is** part of the generated **create data**
+(`UsersCreateData`), so creating a user is fully type-safe — including when
+the password field is marked **hidden** in the collection schema:
 
 ```typescript
-await client.collection('users').create({
+// Create a user (password optional, write-only)
+const user = await client.collection('users').create({
   email: 'ada@example.com',
   password: 'correct-horse-battery', // ✓ typed — write-only, never returned
 });
 
-await client.collection('users').update('rec_abc', { password: 'new-pw' }); // ✓
+// OAuth-only / invite flow — no password at all
+const ghost = await client.collection('users').create({ email: 'ghost@example.com' });
+
+// Change a password later
+await client.collection('users').update(user.id, { password: 'new-pw' }); // ✓
 ```
 
-The server bcrypt-hashes the value and strips it from every response; `create()`
-and `update()` on auth collections accept the collection's `*CreateData` shape,
-so unknown fields are still rejected at compile time.
+> **Backward compatibility:** the raw database field name (`password_hash`)
+> remains accepted as an alias in generated create data, but `password` is the
+> canonical key (matching PocketBase).
+
+Once created, log the user in with `authWithPassword` (see below) — the same
+endpoint the client uses internally for `login()`.
+
+```typescript
+const session = await client.authWithPassword('users', 'ada@example.com', 'correct-horse-battery');
+// session.token + session.record (password stripped); stored in client.authStore
+const whoami = await client.me(); // fresh record via GET /api/me
+```
 
 #### `filter` / `sort` / `expand` — type-checked suggestions
 

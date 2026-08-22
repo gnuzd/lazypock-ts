@@ -111,7 +111,12 @@ const mockCollections = [
 		type: "auth",
 		fields: [
 			{ name: "email", type: "email", required: true },
-			{ name: "password_hash", type: "password", required: true, system: true },
+			{
+				name: "password_hash",
+				type: "password",
+				system: true,
+				hidden: true,
+			},
 			{ name: "verified", type: "bool", required: true, system: true },
 			{
 				name: "emailVisibility",
@@ -170,6 +175,16 @@ check(
 	true,
 );
 check(
+	"password optional in create data (accounts may exist without one)",
+	source.includes('"password"?: string;'),
+	true,
+);
+check(
+	"password_hash kept as backward-compat alias in create data",
+	source.includes('"password_hash"?: string;'),
+	true,
+);
+check(
 	"create data interface generated",
 	source.includes("export interface UsersCreateData"),
 	true,
@@ -196,11 +211,7 @@ check("relation→string", source.includes('"author"?: string;'), true);
 check("multi_select→array", source.includes('"tags"?: ("ts" | "js")[];'), true);
 check("required field no ?", source.includes('"title": string;'), true);
 check("optional bool has ?", source.includes('"published"?: boolean;'), true);
-check(
-	"password_hash required in create data (no server default)",
-	source.includes('"password_hash": string;'),
-	true,
-);
+check("email required in create data", source.includes('"email": string;'), true);
 check(
 	"verified optional in create data (server default false)",
 	source.includes('"verified"?: boolean;'),
@@ -209,11 +220,6 @@ check(
 check(
 	"emailVisibility optional in create data (defaultValue true)",
 	source.includes('"emailVisibility"?: boolean;'),
-	true,
-);
-check(
-	"email required in create data",
-	source.includes('"email": string;'),
 	true,
 );
 check(
