@@ -10,6 +10,7 @@ import {
 	createClient,
 	TypedClient,
 	type LazypockCollections,
+	type CollectionService,
 } from "./src/index";
 
 // A hand-rolled collections map (simulating codegen output)
@@ -130,5 +131,55 @@ await base.collection("posts").getList(1, 20, {
 	sort: "-anything",
 	expand: "whatever",
 });
+
+// ── 7. Auth collection: write-only password in create data ──
+// Mirrors what the codegen CLI emits for the built-in `users` auth
+// collection: the read model has NO password, while the *CreateData write
+// model exposes `password` (canonical, optional) plus the legacy
+// `password_hash` alias.
+interface UsersRecord {
+	id: string;
+	collectionId: string;
+	collectionName: string;
+	created: string;
+	updated: string;
+	email: string;
+	verified: boolean;
+	emailVisibility: boolean;
+}
+interface UsersCreateData {
+	email: string;
+	password?: string;
+	password_hash?: string;
+	name?: string;
+	verified?: boolean;
+	emailVisibility?: boolean;
+}
+type GeneratedCollections = { users: UsersRecord };
+type GeneratedCreateData = { users: UsersCreateData };
+
+declare function genCollection<T extends string>(
+	name: T,
+): T extends keyof GeneratedCollections
+	? CollectionService<GeneratedCollections[T], GeneratedCreateData[T]>
+	: CollectionService<unknown>;
+
+const genUsers = genCollection("users");
+// Creating a user with `password` typechecks (the canonical write key)
+genUsers.create({ email: "a@b.c", password: "secret" }); // ✓
+// Password is optional — accounts may exist without one
+genUsers.create({ email: "a@b.c" }); // ✓
+// Legacy `password_hash` alias still accepted
+genUsers.create({ email: "a@b.c", password_hash: "legacy" }); // ✓
+// @ts-expect-error password is a string, not a number
+genUsers.create({ email: "a@b.c", password: 123 });
+// @ts-expect-error unknown field
+genUsers.create({ email: "a@b.c", nope: 1 });
+// The read model never carries a password
+const genUser = await genUsers.getOne("abc");
+if (genUser) {
+	// @ts-expect-error password is never on the read model
+	genUser.password;
+}
 
 console.log("type-test OK (compile-time checks only)");
