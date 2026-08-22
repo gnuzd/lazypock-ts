@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.4](https://github.com/gnuzd/lazypock-ts/compare/v0.8.3...v0.8.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **codegen:** expose write-only `password` in auth collection create data ([c9a10c0](https://github.com/gnuzd/lazypock-ts/commit/c9a10c038bc67e8124eed20e8befdaaa650752d5))
+* **codegen:** expose write-only `password` in auth collection create data ([904f204](https://github.com/gnuzd/lazypock-ts/commit/904f20458c397fe1f0650b4648ae47c2397987fa))
+
 ## [0.8.3](https://github.com/gnuzd/lazypock-ts/compare/v0.8.2...v0.8.3) (2026-08-22)
 
 
