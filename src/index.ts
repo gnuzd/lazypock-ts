@@ -3,6 +3,9 @@
 // Re-exports everything from the LazypockClient module plus the
 // typed-client factory. Keep this file a thin barrel so there are
 // no circular imports.
+//
+// NOTE: This is the public API surface. Anything added here becomes
+// part of the published package's stable exports.
 
 export {
 	// LazypockClient + options + everything it re-exports
