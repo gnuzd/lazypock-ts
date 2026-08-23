@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/gnuzd/lazypock-ts/compare/v0.8.4...v0.9.0) (2026-08-23)
+
+
+### Features
+
+* **realtime:** pocketbase-style subscribe, auto-auth socket, custom channels ([34998d0](https://github.com/gnuzd/lazypock-ts/commit/34998d0aa6ceaee1f1c2331fbdee0153e97cf183))
+* **realtime:** PocketBase-style subscribe, auto-auth socket, custom channels ([9281442](https://github.com/gnuzd/lazypock-ts/commit/92814425443e5ab8448112e94a9048d7133961ab))
+
 ## [0.8.4](https://github.com/gnuzd/lazypock-ts/compare/v0.8.3...v0.8.4) (2026-08-22)
 
 
