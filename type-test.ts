@@ -182,4 +182,28 @@ if (genUser) {
 	genUser.password;
 }
 
+// ── 8. PocketBase-style realtime subscribe / unsubscribe ──
+// All PocketBase argument forms typecheck against the typed service.
+postsSvc.subscribe("*", (e) => {
+	// The callback receives a full record (not projected by select())
+	const id: string = e.record.id as string;
+	void id;
+}); // ✓ wildcard
+postsSvc.subscribe("abc-123", (e) => e); // ✓ single record
+postsSvc.subscribe((e) => e); // ✓ shorthand (all records)
+postsSvc.subscribe("abc-123", (e) => e, {
+	expand: "author",
+	headers: { "X-Custom": "1" },
+}); // ✓ options
+// Legacy callback-first form still typechecks
+postsSvc.subscribe((e) => e, "legacy-id");
+// @ts-expect-error topic-first form requires a callback
+postsSvc.subscribe("*");
+// @ts-expect-error subscribe options must be an object
+postsSvc.subscribe("*", (e) => e, 123);
+
+postsSvc.unsubscribe("*"); // ✓ wildcard
+postsSvc.unsubscribe("abc-123"); // ✓ single record
+postsSvc.unsubscribe(); // ✓ all
+
 console.log("type-test OK (compile-time checks only)");

@@ -329,10 +329,13 @@ PocketBase-style service for the collections themselves (admin):
 
 - `realtime.connect(opts)` — Connect to WebSocket
 - `realtime.disconnect()` — Disconnect
-- `realtime.subscribe(topic, callback)` — Low-level subscribe (topic like `collection:posts`)
+- `realtime.refresh()` — Reconnect with the current auth token (auto-called on auth change)
+- `realtime.setTokenProvider(fn)` — Register a token provider consulted at every connect
+- `realtime.subscribe(topic, callback, joinPayload?)` — Low-level subscribe (any topic, e.g. `collection:posts` or custom `chat:room1`)
 - `realtime.unsubscribe(topic, callback?)` — Low-level unsubscribe
-- `collection(name).subscribe(callback, recordId?)` — Subscribe to record changes; callback receives `{ action, record }`; returns unsubscribe fn
-- `collection(name).unsubscribe(recordId?)` — Unsubscribe from record changes
+- `realtime.unsubscribeByPrefix(prefix)` — Remove all subscriptions under a topic prefix
+- `collection(name).subscribe(topicOrCallback?, callback?, options?)` — PocketBase-style record subscription; callback receives `{ action, record }` (full record); returns unsubscribe fn
+- `collection(name).unsubscribe(topic?)` — Unsubscribe `'*'`, a record id, or all subscriptions
 
 ### CollectionService
 
@@ -346,8 +349,8 @@ Returned by `client.collection(name)`.
 - `create(data, options?)` — Create record
 - `update(id, data, options?)` — Update record
 - `delete(id, options?)` — Delete record
-- `subscribe(callback, recordId?)` — Subscribe to record changes (PocketBase-style)
-- `unsubscribe(recordId?)` — Unsubscribe
+- `subscribe(topicOrCallback?, callback?, options?)` — PocketBase-style: `subscribe(cb)`, `subscribe('*', cb)`, `subscribe('id', cb)`, or with `{ expand }` options (legacy `subscribe(cb, recordId)` still works)
+- `unsubscribe(topic?)` — `unsubscribe('*')` / `unsubscribe('id')` / `unsubscribe()` (all)
 - `authWithPassword(identity, password, options?)` — Login to this auth collection
 - `authRefresh(options?)` — Refresh token for this auth collection
 - `authMethods(options?)` — Get available auth methods
@@ -533,21 +536,54 @@ The SDK automatically refreshes expired auth tokens. When a token expires, the n
 
 ## Real-time Subscriptions
 
+### PocketBase-style `subscribe` / `unsubscribe`
+
+Collection subscriptions use the same argument order as PocketBase. The
+callback always receives the **full record** (all fields) — `select()`
+projections only affect `getList`/`getOne`, never subscriptions:
+
 ```typescript
-// Subscribe to all changes in a collection (PocketBase-style: callback-first)
+// Subscribe to all records (three equivalent forms)
 const off = client.collection('posts').subscribe((event) => {
   console.log(event.action); // 'create' | 'update' | 'delete'
-  console.log(event.record);
+  console.log(event.record); // full record — all fields
+});
+client.collection('posts').subscribe('*', (event) => { ... });
+
+// Subscribe to a single record
+client.collection('posts').subscribe('RECORD_ID', (event) => { ... });
+
+// With options — forwarded to the server channel join payload
+// (available to onRealtimeSubscribeRequest hooks)
+client.collection('posts').subscribe('*', (event) => { ... }, {
+  expand: 'author',
+  customKey: 'any extra key is forwarded',
 });
 
-// Subscribe to a specific record only
-client.collection('posts').subscribe((event) => { ... }, 'abc123');
-
 // Unsubscribe
-client.collection('posts').unsubscribe();
+client.collection('posts').unsubscribe('*'); // wildcard only
+client.collection('posts').unsubscribe('RECORD_ID'); // one record
+client.collection('posts').unsubscribe(); // everything in this collection
 
 // ...or call the returned unsubscribe function for one-shot listeners:
 off();
+```
+
+The legacy callback-first form (`subscribe(cb, recordId)`) still works.
+`headers` in the options object is accepted for PocketBase signature
+compatibility but is not sent over the WebSocket.
+
+### Auth tokens are attached automatically
+
+The WebSocket automatically uses the current auth token (`authStore.token`)
+and **reconnects when auth changes** (login / logout / token refresh) — so
+subscriptions to rule-protected collections and admin channels work without
+any manual socket management:
+
+```typescript
+await client.login('admin@example.com', 'secret');
+// The socket reconnects with the new token; existing subscriptions re-join.
+client.collection('private_feed').subscribe('*', (e) => { ... });
 ```
 
 ### Anonymous / rule-based realtime
@@ -563,6 +599,20 @@ so no token is required to receive public change events:
 const off = client.collection('public_feed').subscribe((e) => {
   console.log(e.action, e.record);
 });
+```
+
+### Custom channels
+
+Any topic string can be subscribed to via the low-level realtime service
+(PocketBase behavior — anonymous joins allowed, broadcasts come from the
+server side):
+
+```typescript
+// Subscribe to an arbitrary topic
+const off = client.realtime.subscribe('chat:room1', (event) => {
+  console.log(event.event, event.payload);
+});
+off(); // or client.realtime.unsubscribe('chat:room1');
 ```
 
 

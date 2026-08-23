@@ -60,6 +60,23 @@ export interface RealtimeMessage {
 /** Subscription callback for a collection's realtime events. */
 export type RealtimeCallback = (e: RealtimeMessage) => void;
 
+/**
+ * Options for {@link CollectionService.subscribe} (PocketBase-compatible).
+ *
+ * `expand` and any extra keys are forwarded to the server channel join
+ * payload (available to `onRealtimeSubscribeRequest` hooks). `headers` is
+ * accepted for PocketBase signature compatibility but has no effect over
+ * WebSocket — it is not forwarded.
+ */
+export interface RealtimeSubscribeOptions {
+	/** Fields to expand on the subscribed records (server join payload). */
+	expand?: string;
+	/** Accepted for PocketBase parity; not sent over the WebSocket. */
+	headers?: Record<string, string>;
+	/** Any extra keys are forwarded verbatim to the server join payload. */
+	[key: string]: unknown;
+}
+
 /** Raw event passed by the low-level realtime service. */
 interface RealtimeEventLike {
 	event: string;
@@ -505,23 +522,64 @@ export class CollectionService<T = ApiRecord, TData = never> {
 
 	/**
 	 * Subscribe to realtime changes for this collection.
-	 * The event's `action` is one of `"create" | "update" | "delete"`.
+	 * The event's `action` is one of `"create" | "update" | "delete"` and the
+	 * callback always receives the **full record** (all fields, regardless of
+	 * any `select()` projection on the service).
 	 *
 	 * Access is governed by the collection's `listRule` (PocketBase semantics):
 	 * public collections allow anonymous subscriptions; other collections
 	 * require a matching logged-in user or superuser.
 	 *
-	 * @param callback Received on every record change.
-	 * @param recordId Optional — subscribe to a single record instead of `*`.
+	 * PocketBase-compatible argument forms:
+	 *   - `subscribe(cb)` — all records of the collection
+	 *   - `subscribe('*', cb)` — all records (explicit wildcard)
+	 *   - `subscribe('RECORD_ID', cb)` — a single record
+	 *   - `subscribe('*' | 'RECORD_ID', cb, options)` — with join options
+	 *
+	 * Legacy form (callback first) is still accepted: `subscribe(cb, recordId)`.
+	 *
 	 * @returns A function that unsubscribes this callback.
 	 */
-	subscribe(callback: RealtimeCallback, recordId?: string): () => void {
+	subscribe(callback: RealtimeCallback): () => void;
+	subscribe(
+		recordId: string,
+		callback: RealtimeCallback,
+		options?: RealtimeSubscribeOptions,
+	): () => void;
+	/** @deprecated Use `subscribe(recordId, callback)` — PocketBase order. */
+	subscribe(callback: RealtimeCallback, recordId?: string): () => void;
+	subscribe(
+		topicOrCallback: string | RealtimeCallback,
+		maybeCallback?: RealtimeCallback | string,
+		options?: RealtimeSubscribeOptions,
+	): () => void {
 		if (!this.realtime) {
 			console.warn("[lazypock] No realtime service configured.");
 			return () => {};
 		}
+
+		// Normalise PocketBase-style args; also accept the legacy callback-first
+		// form (subscribe(cb, recordId)) for backward compatibility.
+		let recordId: string | undefined;
+		let callback: RealtimeCallback;
+		let joinPayload: Record<string, unknown> | undefined;
+
+		if (typeof topicOrCallback === "function") {
+			callback = topicOrCallback;
+			if (typeof maybeCallback === "string") recordId = maybeCallback;
+		} else {
+			callback = maybeCallback as RealtimeCallback;
+			recordId = topicOrCallback === "*" ? undefined : topicOrCallback;
+			// Forward subscribe options (minus HTTP-only headers) to the server
+			// channel join payload.
+			const { headers: _ignored, ...rest } = options ?? {};
+			if (Object.keys(rest).length > 0) joinPayload = rest;
+		}
+
 		const topic =
-			"collection:" + this.collectionName + (recordId ? ":" + recordId : "");
+			"collection:" +
+			this.collectionName +
+			(recordId ? ":" + recordId : "");
 		const handler = (raw: RealtimeEventLike) => {
 			const record = (raw.payload?.["record"] ?? {}) as Record<string, unknown>;
 			callback({
@@ -531,17 +589,27 @@ export class CollectionService<T = ApiRecord, TData = never> {
 			});
 		};
 		this.realtime.ensureConnected();
-		this.realtime.subscribe(topic, handler as never);
+		this.realtime.subscribe(topic, handler as never, joinPayload);
 		return () => this.realtime?.unsubscribe(topic, handler as never);
 	}
 
 	/**
-	 * Unsubscribe all callbacks from this collection (or a specific record).
-	 * @param recordId Optional record id; omitting it unsubs everything.
+	 * Unsubscribe from realtime changes (PocketBase-compatible):
+	 *   - `unsubscribe()` — remove **all** subscriptions of this collection
+	 *   - `unsubscribe('*')` — remove wildcard subscriptions
+	 *   - `unsubscribe('RECORD_ID')` — remove that record's subscriptions
 	 */
 	unsubscribe(recordId?: string): void {
+		if (recordId === undefined) {
+			this.realtime?.unsubscribeByPrefix(
+				"collection:" + this.collectionName,
+			);
+			return;
+		}
 		const topic =
-			"collection:" + this.collectionName + (recordId ? ":" + recordId : "");
+			"collection:" +
+			this.collectionName +
+			(recordId === "*" ? "" : ":" + recordId);
 		this.realtime?.unsubscribe(topic);
 	}
 

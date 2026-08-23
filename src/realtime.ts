@@ -16,6 +16,8 @@ interface RealtimeEvent {
 interface SubEntry {
 	topic: string;
 	callback: (e: RealtimeEvent) => void;
+	/** Optional payload forwarded with the channel join (e.g. expand). */
+	joinPayload?: Record<string, unknown>;
 }
 
 export type RealtimeConnectOpts = {
@@ -24,6 +26,13 @@ export type RealtimeConnectOpts = {
 	/** Auth token to pass as query param */
 	token?: string;
 };
+
+/**
+ * Provides the current auth token at connect/reconnect time.
+ * Wired by {@link LazypockClient} from its `authStore` so the socket is
+ * always authenticated with the latest token (PocketBase parity).
+ */
+export type RealtimeTokenProvider = () => string | undefined;
 
 /**
  * Derive a WebSocket URL from an HTTP base URL.
@@ -67,6 +76,7 @@ export class RealtimeService {
 
 	private url: string = "";
 	private token: string | undefined;
+	private tokenProvider: RealtimeTokenProvider | null = null;
 
 	/** Whether the WebSocket is currently open. */
 	get isOpen(): boolean {
@@ -92,6 +102,35 @@ export class RealtimeService {
 	 */
 	setUrl(url: string): void {
 		this.url = url;
+	}
+
+	/**
+	 * Register a token provider consulted at every (re)connect.
+	 * When set, it takes precedence over the token passed to {@link connect}.
+	 */
+	setTokenProvider(provider: RealtimeTokenProvider): void {
+		this.tokenProvider = provider;
+	}
+
+	/**
+	 * Reconnect the socket immediately with the current token.
+	 * Called by the SDK when auth changes (login/logout/token refresh) so
+	 * private-channel joins are authorized with the new credentials. No-op
+	 * when the socket has never been opened and nothing is subscribed.
+	 */
+	refresh(): void {
+		if (typeof WebSocket === "undefined") return;
+		if (!this.ws && this.subscriptions.size === 0) return;
+		this.clearReconnectTimer();
+		const ws = this.ws;
+		this.ws = null;
+		if (ws) {
+			// Suppress the auto-reconnect path for this intentional close.
+			ws.onclose = null;
+			ws.close();
+		}
+		this.reconnectAttempt = 0;
+		this.doConnect();
 	}
 
 	/*
@@ -120,16 +159,36 @@ export class RealtimeService {
 	}
 
 	/**
-	 * Subscribe to a topic (e.g. "collection:posts" or "collection:posts:*").
+	 * Subscribe to a topic (e.g. "collection:posts" or "custom:chat-room").
 	 * The backend Channel authorizes via listRule on join.
+	 *
+	 * @param joinPayload Optional payload forwarded with the channel join
+	 * (available to the server's join callback / hooks, e.g. `expand`).
 	 */
-	subscribe(topic: string, callback: (e: RealtimeEvent) => void): void {
+	subscribe(
+		topic: string,
+		callback: (e: RealtimeEvent) => void,
+		joinPayload?: Record<string, unknown>,
+	): void {
 		const subs = this.subscriptions.get(topic) || [];
-		subs.push({ topic, callback });
+		subs.push({ topic, callback, joinPayload });
 		this.subscriptions.set(topic, subs);
 
 		if (this.ws?.readyState === WebSocket.OPEN) {
-			this.joinTopic(topic);
+			this.joinTopic(topic, joinPayload);
+		}
+	}
+
+	/**
+	 * Remove all subscriptions for topics under `prefix` (the topic itself or
+	 * any topic starting with `prefix + ":"`). Used by collection-level
+	 * `unsubscribe()` to drop every subscription of a collection.
+	 */
+	unsubscribeByPrefix(prefix: string): void {
+		for (const topic of [...this.subscriptions.keys()]) {
+			if (topic === prefix || topic.startsWith(prefix + ":")) {
+				this.subscriptions.delete(topic);
+			}
 		}
 	}
 
@@ -152,9 +211,14 @@ export class RealtimeService {
 	}
 
 	private resubscribeAll(): void {
-		for (const topic of this.subscriptions.keys()) {
-			if (this.ws?.readyState === WebSocket.OPEN) {
-				this.joinTopic(topic);
+		const seen = new Set<string>();
+		for (const entries of this.subscriptions.values()) {
+			for (const entry of entries) {
+				if (seen.has(entry.topic)) continue;
+				seen.add(entry.topic);
+				if (this.ws?.readyState === WebSocket.OPEN) {
+					this.joinTopic(entry.topic, entry.joinPayload);
+				}
 			}
 		}
 	}
@@ -168,11 +232,12 @@ export class RealtimeService {
 		}
 
 		let url = this.url;
-		if (this.token) {
+		const token = this.tokenProvider ? this.tokenProvider() : this.token;
+		if (token) {
 			url +=
 				(url.includes("?") ? "&" : "?") +
 				"token=" +
-				encodeURIComponent(this.token);
+				encodeURIComponent(token);
 		}
 
 		this.ws = new WebSocket(url);
@@ -232,13 +297,16 @@ export class RealtimeService {
 		}
 	}
 
-	private joinTopic(topic: string): void {
+	private joinTopic(
+		topic: string,
+		joinPayload?: Record<string, unknown>,
+	): void {
 		const ref = this.nextRef();
 		// Phoenix V1 JSON Serializer expects a JSON object, not an array
 		const msg = JSON.stringify({
 			topic: topic,
 			event: "phx_join",
-			payload: {},
+			payload: joinPayload ?? {},
 			ref: ref,
 		});
 		this.ws?.send(msg);
