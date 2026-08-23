@@ -244,6 +244,9 @@ import { LazypockClient, RealtimeService, getScaleUrl } from "./dist/index.js";
 import { HttpClient, ApiError } from "./dist/index.js";
 
 // Stub WebSocket so subscribe() doesn't hit the network.
+// Captures created sockets, their URLs (token assertions) and outbound
+// messages (join payload assertions) into `wsLog`.
+const wsLog = { urls: [], sends: [], instances: [] };
 globalThis.WebSocket = class {
 	static CONNECTING = 0;
 	static OPEN = 1;
@@ -254,9 +257,16 @@ globalThis.WebSocket = class {
 	onmessage = null;
 	onclose = null;
 	onerror = null;
-	constructor() {}
-	send() {}
-	close() {}
+	constructor(url) {
+		wsLog.urls.push(url);
+		wsLog.instances.push(this);
+	}
+	send(data) {
+		wsLog.sends.push(typeof data === "string" ? JSON.parse(data) : data);
+	}
+	close() {
+		this.readyState = 3;
+	}
 };
 
 (() => {
@@ -350,6 +360,179 @@ globalThis.WebSocket = class {
 		getScaleUrl("/api", "abc-123", "100x100"),
 		"/api/files/abc-123/scale/100x100",
 	);
+
+	// ── PocketBase-style subscribe arg forms ──
+	{
+		const c = new LazypockClient({ baseUrl: "http://localhost:4000/api" });
+		const s = c.collection("posts");
+		wsLog.sends = [];
+		const joins = () => wsLog.sends.filter((m) => m.event === "phx_join");
+
+		const offStar = s.subscribe("*", (e) => e);
+		check(
+			"subscribe('*', cb) joins the wildcard topic",
+			joins().at(-1)?.topic,
+			"collection:posts",
+		);
+
+		const offRec = s.subscribe("abc-123", (e) => e);
+		check(
+			"subscribe('id', cb) joins the record topic",
+			joins().at(-1)?.topic,
+			"collection:posts:abc-123",
+		);
+
+		const offCb = s.subscribe((e) => e);
+		check(
+			"subscribe(cb) joins the wildcard topic",
+			joins().at(-1)?.topic,
+			"collection:posts",
+		);
+
+		const offLegacy = s.subscribe((e) => e, "legacy-id");
+		check(
+			"legacy subscribe(cb, id) joins the record topic",
+			joins().at(-1)?.topic,
+			"collection:posts:legacy-id",
+		);
+
+		offStar();
+		offRec();
+		offCb();
+		offLegacy();
+	}
+
+	// ── subscribe options are forwarded to the join payload ──
+	{
+		const c = new LazypockClient({ baseUrl: "http://localhost:4000/api" });
+		wsLog.sends = [];
+		c.collection("posts").subscribe("*", (e) => e, {
+			expand: "author",
+			headers: { "X-Custom": "1" },
+			customKey: 42,
+		});
+		const join = wsLog.sends.filter((m) => m.event === "phx_join").at(-1);
+		check(
+			"join payload carries expand",
+			join?.payload?.expand,
+			"author",
+		);
+		check("join payload carries custom keys", join?.payload?.customKey, 42);
+		check(
+			"join payload strips HTTP headers",
+			join?.payload?.headers,
+			undefined,
+		);
+	}
+
+	// ── subscribe delivers the full record regardless of select() ──
+	{
+		const c = new LazypockClient({ baseUrl: "http://localhost:4000/api" });
+		// Projected service: select() must NOT leak into subscriptions.
+		const s = c.collection("posts").select("id", "title");
+		let received = null;
+		const off = s.subscribe((e) => (received = e));
+		const fullRecord = {
+			id: "1",
+			title: "x",
+			secret_field: "hidden",
+			author: "u1",
+		};
+		wsLog.instances
+			.at(-1)
+			.onmessage?.({
+				data: JSON.stringify({
+					topic: "collection:posts",
+					event: "record_change",
+					payload: { action: "create", record: fullRecord },
+				}),
+			});
+		check(
+			"subscribe delivers all fields (no select projection)",
+			JSON.stringify(received?.record),
+			JSON.stringify(fullRecord),
+		);
+		off();
+	}
+
+	// ── unsubscribe variants ──
+	{
+		const c = new LazypockClient({ baseUrl: "http://localhost:4000/api" });
+		const s = c.collection("posts");
+		const got = [];
+		s.subscribe((e) => got.push(e));
+		s.subscribe("rec-1", (e) => got.push(e));
+		s.subscribe("rec-2", (e) => got.push(e));
+		const ws = wsLog.instances.at(-1);
+		const fire = (topic) =>
+			ws.onmessage?.({
+				data: JSON.stringify({
+					topic,
+					event: "record_change",
+					payload: { action: "update", record: { id: "x" } },
+				}),
+			});
+
+		fire("collection:posts");
+		check("wildcard sub receives events", got.length, 1);
+
+		s.unsubscribe("*");
+		fire("collection:posts");
+		check("unsubscribe('*') stops wildcard events", got.length, 1);
+
+		fire("collection:posts:rec-1");
+		check("record sub still receives events", got.length, 2);
+
+		s.unsubscribe("rec-1");
+		fire("collection:posts:rec-1");
+		check("unsubscribe('rec-1') stops that record's events", got.length, 2);
+
+		fire("collection:posts:rec-2");
+		check("other record sub unaffected", got.length, 3);
+
+		s.unsubscribe();
+		fire("collection:posts:rec-2");
+		check("unsubscribe() removes all remaining subs", got.length, 3);
+	}
+
+	// ── auth token is attached to the realtime socket ──
+	{
+		const c = new LazypockClient({ baseUrl: "http://localhost:4000/api" });
+		c.authStore.set("jwt-token-123", null);
+		wsLog.urls = [];
+		c.collection("posts").subscribe((e) => e);
+		check(
+			"socket URL carries the auth token",
+			wsLog.urls.some((u) => u.includes("token=jwt-token-123")),
+			true,
+		);
+	}
+
+	// ── auth change reconnects the socket with the new token ──
+	{
+		const c = new LazypockClient({ baseUrl: "http://localhost:4000/api" });
+		c.collection("posts").subscribe((e) => e); // open socket, no token
+		wsLog.urls = [];
+		wsLog.sends = [];
+		c.authStore.set("token-after-login", null); // triggers refresh()
+		check(
+			"auth change reconnects (new socket opened)",
+			wsLog.urls.length,
+			1,
+		);
+		check(
+			"reconnected socket URL carries the token",
+			wsLog.urls[0]?.includes("token=token-after-login"),
+			true,
+		);
+		wsLog.instances.at(-1)?.onopen?.();
+		const joins = wsLog.sends.filter((m) => m.event === "phx_join");
+		check(
+			"topics are re-joined after reconnect",
+			joins.some((m) => m.topic === "collection:posts"),
+			true,
+		);
+	}
 })();
 
 // ── Auto-cancellation tests ──

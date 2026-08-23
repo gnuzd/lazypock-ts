@@ -28,6 +28,7 @@ import {
 	type FieldKey,
 } from "./types";
 import { RealtimeService, wsUrlFromBaseUrl } from "./realtime";
+import type { RealtimeConnectOpts, RealtimeTokenProvider } from "./realtime";
 import {
 	FilesService,
 	getFileUrl,
@@ -69,6 +70,9 @@ export type {
 	SystemFields,
 	RequestOptions,
 	FileRecord,
+	// realtime
+	RealtimeConnectOpts,
+	RealtimeTokenProvider,
 	CollectionSchema,
 	SchemaField,
 	// schema-driven query typing
@@ -154,6 +158,12 @@ export class LazypockClient {
 		if (!options.realtime) {
 			this.realtime.setUrl(wsUrlFromBaseUrl(baseUrl));
 		}
+		// Keep the realtime socket authenticated with the current auth token
+		// and reconnect whenever auth changes (login/logout/token refresh) —
+		// PocketBase parity. Reconnect is a no-op until something subscribes.
+		this.realtime.setTokenProvider(() => this.authStore.token);
+		this.authStore.onChange(() => this.realtime.refresh());
+		this.authReady.then(() => this.realtime.refresh());
 		this.files = new FilesService(this.http);
 		this.collections = new CollectionsService(this.http, this.realtime);
 		if (options.types?.schemas) {
