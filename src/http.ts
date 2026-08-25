@@ -21,6 +21,11 @@ export class HttpClient {
 	private authStore: AuthStore;
 	private defaultFetch: typeof globalThis.fetch;
 
+	// Per-client connection id (browser tab / device). Sent as the
+	// `X-Connection-Id` header on every request so the server can exclude
+	// the *originating* connection from its own realtime broadcasts.
+	private connectionId?: string;
+
 	/**
 	 * Abort controllers for in-flight requests, keyed by their cancellation key
 	 * (default `METHOD path`). A new request with the same key aborts the
@@ -42,10 +47,13 @@ export class HttpClient {
 	/**
 	 * @param baseUrl The API base URL (e.g. `http://localhost:4000/api`). Trailing slash stripped.
 	 * @param authStore The auth store providing the token for Authorization headers.
+	 * @param connectionId Optional per-client connection id, sent as the
+	 * `X-Connection-Id` header on every request (realtime origin-exclusion).
 	 */
-	constructor(baseUrl: string, authStore: AuthStore) {
+	constructor(baseUrl: string, authStore: AuthStore, connectionId?: string) {
 		this.baseUrl = baseUrl.replace(/\/+$/, "");
 		this.authStore = authStore;
+		this.connectionId = connectionId;
 		this.defaultFetch = globalThis.fetch.bind(globalThis);
 	}
 
@@ -247,6 +255,17 @@ export class HttpClient {
 
 		if (this.authStore.token) {
 			headers["Authorization"] = "Bearer " + this.authStore.token;
+		}
+
+		// Advertise the connection id unless the caller already set it
+		// explicitly (a custom wrapper's id wins — it must match the id it
+		// put on the socket URL).
+		if (
+			this.connectionId &&
+			!headers["X-Connection-Id"] &&
+			!headers["x-connection-id"]
+		) {
+			headers["X-Connection-Id"] = this.connectionId;
 		}
 
 		const init: RequestInit = {

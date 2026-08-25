@@ -41,6 +41,28 @@ import type { CollectionSchema, SchemaField } from "./schema";
 import { generateTypes, collectionTypeName } from "./codegen";
 import { fieldTypeScriptType, fieldTypeKind, schemaFieldType } from "./typegen";
 
+/**
+ * Generate a per-client connection id (browser tab / device). Prefers
+ * `crypto.randomUUID` when available, falls back to a random string.
+ */
+function createConnectionId(): string {
+	try {
+		if (
+			typeof crypto !== "undefined" &&
+			typeof crypto.randomUUID === "function"
+		) {
+			return crypto.randomUUID();
+		}
+	} catch {
+		// fall through to the fallback below
+	}
+	return (
+		"conn-" +
+		Math.random().toString(36).slice(2) +
+		Date.now().toString(36)
+	);
+}
+
 export {
 	AuthStore,
 	ApiError,
@@ -152,12 +174,19 @@ export class LazypockClient {
 		this.authReady = options.authStore
 			? Promise.resolve()
 			: this.authStore.init();
-		this.http = new HttpClient(baseUrl, this.authStore);
+		// One connection id per client instance (browser tab / device): it
+		// travels on every HTTP request (X-Connection-Id header) and with the
+		// realtime socket (?connectionId=) so the server can exclude the
+		// *originating* connection from its own realtime broadcasts while the
+		// same user's other tabs/devices still receive them.
+		const connectionId = createConnectionId();
+		this.http = new HttpClient(baseUrl, this.authStore, connectionId);
 		this.realtime = options.realtime ?? new RealtimeService();
 		// Cache the socket URL so collection-level subscribe() can auto-connect.
 		if (!options.realtime) {
 			this.realtime.setUrl(wsUrlFromBaseUrl(baseUrl));
 		}
+		this.realtime.setConnectionId(connectionId);
 		// Keep the realtime socket authenticated with the current auth token
 		// and reconnect whenever auth changes (login/logout/token refresh) —
 		// PocketBase parity. Reconnect is a no-op until something subscribes.

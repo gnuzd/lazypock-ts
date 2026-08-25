@@ -78,6 +78,12 @@ export class RealtimeService {
 	private token: string | undefined;
 	private tokenProvider: RealtimeTokenProvider | null = null;
 
+	// Per-client connection id (browser tab / device). Sent as the
+	// `connectionId` socket query param so the server can exclude the
+	// *originating* connection from its own realtime broadcasts, while the
+	// same user's other tabs/devices still receive them.
+	private connectionId: string | undefined;
+
 	/** Whether the WebSocket is currently open. */
 	get isOpen(): boolean {
 		return this.ws?.readyState === WebSocket.OPEN;
@@ -94,6 +100,17 @@ export class RealtimeService {
 	/** The auth token configured for this connection (set on connect). */
 	get lastToken(): string | undefined {
 		return this.token;
+	}
+
+	/**
+	 * Set the per-client connection id (browser tab / device). The SDK
+	 * appends it as the `connectionId` socket query param at connect time
+	 * (unless the URL already carries one), matching the `X-Connection-Id`
+	 * header the HTTP client sends — together they let the server exclude
+	 * the originating connection from its own realtime broadcasts.
+	 */
+	setConnectionId(id: string): void {
+		this.connectionId = id;
 	}
 
 	/**
@@ -238,6 +255,14 @@ export class RealtimeService {
 				(url.includes("?") ? "&" : "?") +
 				"token=" +
 				encodeURIComponent(token);
+		}
+		// Advertise the connection id on the socket (unless the caller
+		// already provided one via the URL, e.g. a custom client wrapper).
+		if (this.connectionId && !url.includes("connectionId=")) {
+			url +=
+				(url.includes("?") ? "&" : "?") +
+				"connectionId=" +
+				encodeURIComponent(this.connectionId);
 		}
 
 		this.ws = new WebSocket(url);
