@@ -259,6 +259,7 @@ model (no `record.user`) but the server still resolves it for
 `filter`/`sort`/`expand`/`select` — the generated `*QueryFields` type keeps
 those keys accepted, so `getFullList({ expand: "user" })` typechecks for a
 hidden relation.
+
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`)
   still accepts any string — suggestions kick in once the service is typed.
 
