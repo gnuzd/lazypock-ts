@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/gnuzd/lazypock-ts/compare/v0.10.0...v0.10.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **types:** hidden relation fields are expandable/filterable/selectable ([658873e](https://github.com/gnuzd/lazypock-ts/commit/658873e947be5dd1a61de9678fceda5c1988cd77))
+* **types:** hidden relation fields are expandable/filterable/selectable ([7d466d4](https://github.com/gnuzd/lazypock-ts/commit/7d466d47ab3c688b540c425dec79948182ea9077))
+
 ## [0.10.0](https://github.com/gnuzd/lazypock-ts/compare/v0.9.0...v0.10.0) (2026-08-26)
 
 
