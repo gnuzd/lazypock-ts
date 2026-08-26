@@ -8,6 +8,12 @@
 * **realtime:** auto connection id for origin-exclusion ([b705b4a](https://github.com/gnuzd/lazypock-ts/commit/b705b4a2192d43060073218a35c71a0e85a6c1c3))
 * **realtime:** auto connection id for origin-exclusion ([ade8c47](https://github.com/gnuzd/lazypock-ts/commit/ade8c47a68246ffeac26dfdd9ab941e45cfd4ebc))
 
+
+### Bug Fixes
+
+* **types:** suggest collection names + accept real-world filter/expand strings ([1ad62c3](https://github.com/gnuzd/lazypock-ts/commit/1ad62c32a31b4abf3c0884a3412587eb57b53fce))
+* **types:** suggest collection names and accept real-world filter/expand strings ([dbb27aa](https://github.com/gnuzd/lazypock-ts/commit/dbb27aabc4bdad4e362c0d6fc9740c7a59cead50))
+
 ## [0.9.0](https://github.com/gnuzd/lazypock-ts/compare/v0.8.4...v0.9.0) (2026-08-23)
 
 
