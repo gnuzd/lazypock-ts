@@ -144,6 +144,12 @@ const mockCollections = [
 				type: "relation",
 				options: { collection: "users", maxSelect: 1 },
 			},
+			{
+				name: "reviewer",
+				type: "relation",
+				hidden: true,
+				options: { collection: "users", maxSelect: 1 },
+			},
 			{ name: "tags", type: "multi_select", options: { values: ["ts", "js"] } },
 			{ name: "views", type: "number" },
 		],
@@ -202,7 +208,14 @@ check(
 check(
 	"typed collection binds create data",
 	source.includes(
-		"CollectionService<LazypockCollections[K], LazypockCreateData[K]>",
+		"CollectionService<\n        LazypockCollections[K],\n        LazypockCreateData[K],",
+	),
+	true,
+);
+check(
+	"typed collection binds query fields (filter/sort/expand/select)",
+	source.includes(
+		"LazypockCreateData[K],\n        LazypockQueryFields[K]\n      >",
 	),
 	true,
 );
@@ -211,6 +224,35 @@ check(
 	source.includes(
 		"override collection<K extends keyof LazypockCollections | (string & {})>",
 	),
+	true,
+);
+check(
+	"query fields interface generated",
+	source.includes("export interface UsersQueryFields") &&
+		source.includes("export interface BlogPostsQueryFields"),
+	true,
+);
+check(
+	"query fields map generated (auth gets AuthRecord keys)",
+	source.includes('"users": UsersQueryFields & AuthRecord;') &&
+		source.includes('"blog_posts": BlogPostsQueryFields;'),
+	true,
+);
+const usersQueryBlock =
+	source.match(/export interface UsersQueryFields\b[\s\S]*?\n}/)?.[0] ?? "";
+check(
+	"password excluded from query fields",
+	!usersQueryBlock.includes("password"),
+	true,
+);
+const blogPostsRecordBlock =
+	source.match(/export interface BlogPostsRecord\b[\s\S]*?\n}/)?.[0] ?? "";
+const blogPostsQueryBlock =
+	source.match(/export interface BlogPostsQueryFields\b[\s\S]*?\n}/)?.[0] ?? "";
+check(
+	"hidden relation included in query fields but not read model",
+	blogPostsQueryBlock.includes('"reviewer"?: string;') &&
+		!blogPostsRecordBlock.includes("reviewer"),
 	true,
 );
 check("select union in output", source.includes('"admin" | "member"'), true);

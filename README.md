@@ -253,6 +253,12 @@ await postsSvc.getOne('abc', { expand: 'author' });
 - `expand` — comma-separated relation field names, including nested dot-paths
   (`author.user`); non-relation fields warn at runtime when a schema is
   available.
+
+**Hidden fields are queryable.** A hidden relation is excluded from the read
+model (no `record.user`) but the server still resolves it for
+`filter`/`sort`/`expand`/`select` — the generated `*QueryFields` type keeps
+those keys accepted, so `getFullList({ expand: "user" })` typechecks for a
+hidden relation.
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`)
   still accepts any string — suggestions kick in once the service is typed.
 
@@ -623,7 +629,6 @@ const off = client.realtime.subscribe('chat:room1', (event) => {
 off(); // or client.realtime.unsubscribe('chat:room1');
 ```
 
-
 ## Releasing (automatic)
 
 Releases are fully automatic via [release-please](https://github.com/googleapis/release-please):
@@ -648,7 +653,7 @@ There is no manual `workflow_dispatch` step and no local `npm publish`.
 ### One-time setup
 
 - Add an npm access token (Automation or Publish scope, from
-  <https://www.npmjs.com/settings/<you>/tokens>) as the repo secret
+  <<https://www.npmjs.com/settings/><you>/tokens>) as the repo secret
   **`NPM_TOKEN`** under Settings → Secrets and variables → Actions.
 
 ## License
