@@ -202,7 +202,14 @@ check(
 check(
 	"typed collection binds create data",
 	source.includes(
-		"CollectionService<LazypockCollections[T], LazypockCreateData[T]>",
+		"CollectionService<LazypockCollections[K], LazypockCreateData[K]>",
+	),
+	true,
+);
+check(
+	"collection names suggested and dynamic names accepted",
+	source.includes(
+		"override collection<K extends keyof LazypockCollections | (string & {})>",
 	),
 	true,
 );
@@ -262,7 +269,17 @@ globalThis.WebSocket = class {
 		wsLog.instances.push(this);
 	}
 	send(data) {
-		wsLog.sends.push(typeof data === "string" ? JSON.parse(data) : data);
+		wsLog.sends.push(
+			typeof data === "string"
+				? (() => {
+						try {
+							return JSON.parse(data);
+						} catch {
+							return data;
+						}
+				  })()
+				: data,
+		);
 	}
 	close() {
 		this.readyState = 3;

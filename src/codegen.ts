@@ -181,26 +181,27 @@ export function createClient(options: LazypockClientOptions): TypedClient {
 }
 
 export class TypedClient extends LazypockClient {
-  // K extends keyof LazypockCollections (rather than a generic string with a
-  // conditional return) so the IDE suggests collection names and unknown names
-  // are rejected at compile time:
-  //   client.collection("posts")  // suggested + typed
-  //   client.collection("nope")   // TS error
+  // The constraint is "keyof LazypockCollections | (string & {})" rather than a
+  // bare generic string or a strict keyof:
+  //   - the keyof LazypockCollections member is what makes the IDE suggest
+  //     collection names, and known literals resolve to the typed service:
+  //       client.collection("posts")  // suggested + typed
+  //   - the string & {} member keeps unknown/dynamic names compiling — they
+  //     resolve to the untyped service, so a studio that manages
+  //     user-created collections can still call collection(someString).
+  //
+  // The (string & {}) intersection keeps the union from collapsing to plain
+  // string (which would silently kill the suggestions).
   //
   // create()/update() take the collection's *CreateData — the read model
   // omits password/hidden fields, but the write model carries them.
-  // T extends string (rather than keyof LazypockCollections) with a conditional
-  // return type, so the IDE suggests collection names AND unknown/dynamic names
-  // still resolve to the untyped service — a studio that manages
-  // user-created collections must be able to call collection(someString).
-  //
-  // create()/update() take the collection's *CreateData — the read model
-  // omits password/hidden fields, but the write model carries them.
-  override collection<T extends string>(name: T): T extends keyof LazypockCollections
-    ? CollectionService<LazypockCollections[T], LazypockCreateData[T]>
+  override collection<K extends keyof LazypockCollections | (string & {})>(
+    name: K,
+  ): K extends keyof LazypockCollections
+    ? CollectionService<LazypockCollections[K], LazypockCreateData[K]>
     : CollectionService<unknown> {
-    return super.collection(name) as T extends keyof LazypockCollections
-      ? CollectionService<LazypockCollections[T], LazypockCreateData[T]>
+    return super.collection(name) as K extends keyof LazypockCollections
+      ? CollectionService<LazypockCollections[K], LazypockCreateData[K]>
       : CollectionService<unknown>;
   }
 }

@@ -234,17 +234,25 @@ await postsSvc.getList(1, 20, { sort: '-nope' });         // ✗ compile error
 await postsSvc.getList(1, 20, {
   filter: "title ~ 'x' && published = true", // ✓ field + operator checked
 });
+await postsSvc.getList(1, 20, { filter: `title=${search}` }); // ✓ spaces optional
+await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" }); // ✓ parens
+await postsSvc.getList(1, 20, { filter: "author.email = 'x'" }); // ✓ relation dot-path
 await postsSvc.getList(1, 20, { filter: 'nope = 1' });    // ✗ compile error
 
 await postsSvc.getList(1, 20, { expand: 'author' });      // ✓ field suggested
+await postsSvc.getList(1, 20, { expand: 'author.user' }); // ✓ nested dot-path
 await postsSvc.getOne('abc', { expand: 'author' });
 ```
 
-- `filter` — `field op value` clauses with `= != ~ !~ > >= < <=` operators;
-  `&&`, `||`, `!`, and parentheses are allowed after the first clause.
+- `filter` — `field op value` clauses with `= != ~ !~ > >= < <=` operators
+  (spaces around the operator optional); `&&`, `||`, `!`, and parentheses are
+  allowed before or after the first clause; relation dot-paths like
+  `author.email = 'x'` typecheck. Field names and operators are suggested as
+  you type.
 - `sort` — `field`, `-field` (desc), `+field`, or comma-separated.
-- `expand` — comma-separated relation field names; non-relation fields warn at
-  runtime when a schema is available.
+- `expand` — comma-separated relation field names, including nested dot-paths
+  (`author.user`); non-relation fields warn at runtime when a schema is
+  available.
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`)
   still accepts any string — suggestions kick in once the service is typed.
 
