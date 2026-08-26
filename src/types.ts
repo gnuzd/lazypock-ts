@@ -148,23 +148,40 @@ export type FilterOp =
 	| "<"
 	| "<=";
 
-/** One `field op value` clause. */
-type FilterClause<T> = `${FieldKey<T>} ${FilterOp} ${string}`;
+/** Optional whitespace around a filter operator (`project=x` and `project = x` both compile). */
+type FilterWs = "" | " ";
+
+/**
+ * A filterable field: a top-level key, or a dot-path into a relation
+ * (`author.email = 'x'`).
+ */
+type FilterField<T> = `${FieldKey<T>}${"" | `.${string}`}`;
+
+/**
+ * One `field op value` clause. Spaces around the operator are optional
+ * (`project=x` / `project = x`) — the backend treats them the same.
+ */
+type FilterClause<T> =
+	`${FilterField<T>}${FilterWs}${FilterOp}${FilterWs}${string}`;
 
 /**
  * Type-checked filter expression (PocketBase syntax).
  *
  * ```ts
  * getList(1, 20, { filter: "title ~ 'x' && published = true" })
+ * getList(1, 20, { filter: `title=${search}` })      // spaces around the operator optional
  * getList(1, 20, { filter: "(title = 'a' || title = 'b')" })
+ * getList(1, 20, { filter: "author.email = 'x'" })    // relation dot-path
  * ```
  *
- * The first clause's field name + operator are validated; the rest of the
- * expression (values, `&&`/`||`, parens, `!`) is free-form.
+ * The expression must start with a valid field name — optionally preceded by
+ * `!` / `(` / `!(` — followed by a valid operator; the rest (values,
+ * `&&`/`||`, `!`, parens) is free-form. Field names and operators are
+ * suggested by the editor as you type.
  */
 export type FilterString<T> =
-	| FilterClause<T>
-	| `${FilterClause<T>}${string}`;
+	| `${FilterClause<T>}${string}`
+	| `${"!" | "(" | "!("}${FilterClause<T>}${string}`;
 
 /** A single `[+|-]field` sort token. */
 type SortField<T> = `${"" | "-" | "+"}${FieldKey<T>}`;
@@ -176,11 +193,21 @@ type SortField<T> = `${"" | "-" | "+"}${FieldKey<T>}`;
 export type SortString<T> = SortField<T> | `${SortField<T>},${string}`;
 
 /**
- * Type-checked expand string: comma-separated relation field names
- * (e.g. `"author"` or `"author,category"`). Non-relation fields are
- * warned about at runtime when a schema is available.
+ * Type-checked expand string: comma-separated relation field names,
+ * including nested dot-paths (e.g. `"author"`, `"author,category"`,
+ * `"author.user.profile"`). Non-relation fields are warned about at
+ * runtime when a schema is available.
  */
-export type ExpandString<T> = FieldKey<T> | `${FieldKey<T>},${string}`;
+type ExpandField<T> = `${FieldKey<T>}${"" | `.${string}`}`;
+
+/**
+ * Type-checked expand string: comma-separated relation field names,
+ * including nested dot-paths (e.g. `"author"`, `"author,category"`,
+ * `"author.user.profile"`).
+ */
+export type ExpandString<T> =
+	| ExpandField<T>
+	| `${ExpandField<T>},${string}`;
 
 /**
  * Query options for list/read operations, typed against a record shape `T`.

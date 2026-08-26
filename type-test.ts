@@ -115,13 +115,24 @@ await postsSvc.getList(1, 20, { sort: "nope" });
 await postsSvc.getList(1, 20, { filter: "title ~ 'x'" });
 await postsSvc.getList(1, 20, { filter: "title = 'a' && published = true" });
 await postsSvc.getFirstListItem("title ~ 'x'");
+// Operators need not be surrounded by spaces (`project=x` and `project = x` both compile).
+const search: string = "abc";
+await postsSvc.getList(1, 20, { filter: `title=${search}` });
+await postsSvc.getList(1, 20, { filter: "title~'x'" });
+// Parenthesized / negated expressions — the first clause is still validated.
+await postsSvc.getList(1, 20, { filter: "(title = 'a' || published = true)" });
+await postsSvc.getList(1, 20, { filter: "!(published = true)" });
+// Relation dot-paths (`author.email = 'x'`) are accepted.
+await postsSvc.getList(1, 20, { filter: "author.email = 'x'" });
 // @ts-expect-error filter rejects unknown fields
 await postsSvc.getList(1, 20, { filter: "nope = 'x'" });
 // @ts-expect-error filter rejects invalid operators
-await postsSvc.getList(1, 20, { filter: "title == 'x'" });
+await postsSvc.getList(1, 20, { filter: "title nope 'x'" });
 
 await postsSvc.getList(1, 20, { expand: "author" });
 await postsSvc.getOne("abc", { expand: "author", fields: "id,title" });
+// Nested dot-paths (`author.user`) are accepted for multi-level relations.
+await postsSvc.getList(1, 20, { expand: "author.user" });
 // @ts-expect-error expand rejects unknown fields
 await postsSvc.getList(1, 20, { expand: "nope" });
 
@@ -158,13 +169,18 @@ interface UsersCreateData {
 type GeneratedCollections = { users: UsersRecord };
 type GeneratedCreateData = { users: UsersCreateData };
 
-declare function genCollection<T extends string>(
-	name: T,
-): T extends keyof GeneratedCollections
-	? CollectionService<GeneratedCollections[T], GeneratedCreateData[T]>
+declare function genCollection<K extends keyof GeneratedCollections | (string & {})>(
+	name: K,
+): K extends keyof GeneratedCollections
+	? CollectionService<GeneratedCollections[K], GeneratedCreateData[K]>
 	: CollectionService<unknown>;
 
 const genUsers = genCollection("users");
+// The generated-style signature also accepts dynamic/unknown names, which
+// resolve to the untyped service (studio/dynamic-collection use case).
+const genDynamic: string = "whatever";
+genCollection(genDynamic).getList(); // ✓ untyped, no error
+genCollection("nope").getList(); // ✓ untyped, no error
 // Creating a user with `password` typechecks (the canonical write key)
 genUsers.create({ email: "a@b.c", password: "secret" }); // ✓
 // Password is optional — accounts may exist without one
@@ -179,7 +195,7 @@ genUsers.create({ email: "a@b.c", nope: 1 });
 const genUser = await genUsers.getOne("abc");
 if (genUser) {
 	// @ts-expect-error password is never on the read model
-	genUser.password;
+	void genUser.password;
 }
 
 // ── 8. PocketBase-style realtime subscribe / unsubscribe ──
