@@ -18,18 +18,31 @@ import type { RealtimeService } from "./realtime";
 import type { CollectionSchema } from "./schema";
 
 /**
+ * A recursively-normalized request value: object keys sorted and
+ * request-transport keys stripped, so functionally-identical calls share
+ * one stable serialization key.
+ */
+type StableRequestValue =
+	| string
+	| number
+	| boolean
+	| null
+	| StableRequestValue[]
+	| { [key: string]: StableRequestValue };
+
+/**
  * Deterministic JSON stringify for building a stable cache/dedup key.
  * Strips request-transport keys (`requestKey`, `singleFlight`, `fetch`,
  * `signal`) so functionally-identical calls share one key.
  */
 export function stableStringify(value: unknown): string {
 	const seen = new Set<object>();
-	const sort = (v: unknown): unknown => {
+	const sort = (v: unknown): StableRequestValue => {
 		if (Array.isArray(v)) return v.map(sort);
 		if (v && typeof v === "object") {
 			if (seen.has(v as object)) return "[Circular]";
 			seen.add(v as object);
-			const out: Record<string, unknown> = {};
+			const out: Record<string, StableRequestValue> = {};
 			for (const k of Object.keys(v as object).sort()) {
 				if (k === "requestKey" || k === "singleFlight" || k === "fetch" || k === "signal") {
 					continue;
@@ -38,7 +51,9 @@ export function stableStringify(value: unknown): string {
 			}
 			return out;
 		}
-		return v;
+		// SAFETY: non-object values are JSON scalars (or undefined, which
+		// JSON.stringify omits from objects) — all representable here.
+		return v as StableRequestValue;
 	};
 	try {
 		return JSON.stringify(sort(value));
@@ -106,8 +121,14 @@ function normalizeAction(
  * Get an instance via {@link LazypockClient.collection}.
  *
  * @typeParam T — The record shape for this collection. Defaults to {@link ApiRecord}.
+ * @typeParam TData — Write-only create/update payload shape (defaults to `never`,
+ * which falls back to `T`-derived create data).
+ * @typeParam TFields — The key set accepted by `filter`/`sort`/`expand`/`select`.
+ * Defaults to `T`. The codegen client binds a *QueryFields type that includes
+ * hidden fields — excluded from the read model but still expandable/filterable
+ * at runtime — so `expand: "hiddenRelation"` typechecks.
  */
-export class CollectionService<T = ApiRecord, TData = never> {
+export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	private http: HttpClient;
 	private collectionName: string;
 	private authStore?: AuthStore;
@@ -165,9 +186,11 @@ export class CollectionService<T = ApiRecord, TData = never> {
 	 * `fields` param — the server returns every non-password field.
 	 * Pass `select("*")` to restore the default after a projection.
 	 */
-	select<K extends FieldKey<T> | "*">(...fields: K[]): CollectionService<T, TData> {
+	select<K extends FieldKey<TFields> | "*">(
+		...fields: K[]
+	): CollectionService<T, TData, TFields> {
 		const preset = fields.length === 0 ? "*" : fields.join(",");
-		const derived = new CollectionService<T, TData>(
+		const derived = new CollectionService<T, TData, TFields>(
 			this.http,
 			this.collectionName,
 			this.authStore,
@@ -272,7 +295,7 @@ export class CollectionService<T = ApiRecord, TData = never> {
 	getList<T2 = T>(
 		page = 1,
 		perPage = 30,
-		options?: ListOptions<T> & RequestOptions,
+		options?: ListOptions<TFields> & RequestOptions,
 	): Promise<ListResult<T2> | null> {
 		const {
 			requestKey,
@@ -325,7 +348,7 @@ export class CollectionService<T = ApiRecord, TData = never> {
 	 * @param options Query params (`sort`, `filter`, `batch`, etc.) + request options.
 	 */
 	async getFullList<T2 = T>(
-		options?: ListOptions<T> & RequestOptions,
+		options?: ListOptions<TFields> & RequestOptions,
 	): Promise<Array<T2>> {
 		const { batch = 1000, ...rest } = options ?? {};
 
@@ -349,7 +372,7 @@ export class CollectionService<T = ApiRecord, TData = never> {
 					...rest,
 					requestKey: effectiveKey,
 					singleFlight: true,
-				} as ListOptions<T> & RequestOptions,
+				} as ListOptions<TFields> & RequestOptions,
 			);
 			if (!res || !res.items || res.items.length === 0) break;
 			items.push(...(res.items as T2[]));
@@ -366,8 +389,8 @@ export class CollectionService<T = ApiRecord, TData = never> {
 	 * @param options Optional request options.
 	 */
 	async getFirstListItem<T2 = T>(
-		filter: FilterString<T>,
-		options?: ListOptions<T> & RequestOptions,
+		filter: FilterString<TFields>,
+		options?: ListOptions<TFields> & RequestOptions,
 	): Promise<T2 | null> {
 		const res = await this.getList<T2>(1, 1, {
 			...options,
@@ -381,7 +404,10 @@ export class CollectionService<T = ApiRecord, TData = never> {
 	 * @param id Record ID.
 	 * @param options Optional request options.
 	 */
-	getOne(id: string, options?: ReadOptions<T> & RequestOptions): Promise<T | null> {
+	getOne(
+		id: string,
+		options?: ReadOptions<TFields> & RequestOptions,
+	): Promise<T | null> {
 		const fields = this.effectiveFields(options?.fields);
 		if (typeof options?.expand === "string") {
 			this.validateExpand(options.expand);
@@ -498,6 +524,8 @@ export class CollectionService<T = ApiRecord, TData = never> {
 	 * ```
 	 */
 	typed<TRecord = ApiRecord>(): CollectionService<TRecord> {
+		// SAFETY: the service is collection-agnostic at runtime — TRecord is a
+		// compile-time lens only, so this cast is a pure type-level projection.
 		return this as unknown as CollectionService<TRecord>;
 	}
 
@@ -506,8 +534,8 @@ export class CollectionService<T = ApiRecord, TData = never> {
 	 * `types.schemas`). Enables schema-aware defaults: hidden fields are
 	 * excluded from responses, select/expand are validated.
 	 */
-	withSchema(schema: CollectionSchema): CollectionService<T, TData> {
-		const derived = new CollectionService<T, TData>(
+	withSchema(schema: CollectionSchema): CollectionService<T, TData, TFields> {
+		const derived = new CollectionService<T, TData, TFields>(
 			this.http,
 			this.collectionName,
 			this.authStore,
@@ -635,6 +663,8 @@ export class CollectionService<T = ApiRecord, TData = never> {
 		);
 		if (data && this.authStore) {
 			this.authStore.setCollectionName(this.collectionName);
+			// SAFETY: the server's auth response record is a superset of
+			// AuthModel; the auth store consumes it generically.
 			this.authStore.set(data.token, data.record as unknown as AuthModel);
 		}
 		return data;
@@ -658,6 +688,8 @@ export class CollectionService<T = ApiRecord, TData = never> {
 		);
 		if (data && this.authStore) {
 			this.authStore.setCollectionName(this.collectionName);
+			// SAFETY: the server's auth response record is a superset of
+			// AuthModel; the auth store consumes it generically.
 			this.authStore.set(data.token, data.record as unknown as AuthModel);
 		}
 		return data;

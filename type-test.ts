@@ -9,7 +9,6 @@ import {
 	LazypockClient,
 	createClient,
 	TypedClient,
-	type LazypockCollections,
 	type CollectionService,
 } from "./src/index";
 
@@ -45,7 +44,8 @@ postsSvc.create({ nope: 1 });
 postsSvc.update("id1", { nope: 1 });
 
 // @ts-expect-error getOne returns Post, not string
-const bad: string = await postsSvc.getOne("abc");
+const _bad: string = await postsSvc.getOne("abc");
+void _bad;
 
 // ── 2. Typed client: collection<K>() resolves per-collection ──
 const typed = createClient<MyCollections>({
@@ -61,7 +61,8 @@ userSvc.create({ email: "a@b.c", role: "admin" });
 userSvc.create({ email: "a@b.c", role: "superadmin" });
 
 // @ts-expect-error "nope" is not in MyCollections
-const nopeSvc = typed.collection("nope");
+const _nopeSvc = typed.collection("nope");
+void _nopeSvc;
 
 // Positive: literal key resolves to the right type (posts → Post)
 const postSvc = typed.collection("posts");
@@ -71,7 +72,8 @@ postSvc.create({ title: "ok" }); // ✓
 // so use the base client (untyped) or a cast for dynamic access.
 const dynName: string = "posts";
 // @ts-expect-error strict keys: string not assignable to literal
-const dynSvc = typed.collection(dynName);
+const _dynSvc = typed.collection(dynName);
+void _dynSvc;
 // Escape hatch: cast to keyof
 const dynCast = typed.collection(dynName as keyof MyCollections);
 dynCast.create({ title: "ok" }); // ✓
@@ -87,7 +89,8 @@ tc.collection("posts").create({ email: "x" });
 const postList = await postsSvc.getList();
 if (postList) {
 	// @ts-expect-error items are Post[], title is string not number
-	const n: number = postList.items[0].title;
+	const _n: number = postList.items[0].title;
+	void _n;
 }
 
 // ── 5. select() field projection ──
@@ -166,13 +169,47 @@ interface UsersCreateData {
 	verified?: boolean;
 	emailVisibility?: boolean;
 }
-type GeneratedCollections = { users: UsersRecord };
-type GeneratedCreateData = { users: UsersCreateData };
+// Query fields — the filter/sort/expand/select key set. Mirrors what the
+// codegen CLI emits: it includes hidden fields, which are excluded from the
+// read model but remain expandable/filterable at runtime.
+interface ProjectMembersRecord {
+	id: string;
+	collectionId: string;
+	collectionName: string;
+	created: string;
+	updated: string;
+	role: "owner" | "editor" | "viewer";
+}
+interface ProjectMembersCreateData {
+	role?: "owner" | "editor" | "viewer";
+}
+interface ProjectMembersQueryFields extends ProjectMembersRecord {
+	project?: string; // hidden relation — not on the read model
+	user?: string; // hidden relation — not on the read model
+}
+type GeneratedCollections = {
+	users: UsersRecord;
+	project_members: ProjectMembersRecord;
+};
+type GeneratedCreateData = {
+	users: UsersCreateData;
+	project_members: ProjectMembersCreateData;
+};
+type GeneratedQueryFields = {
+	users: UsersRecord;
+	project_members: ProjectMembersQueryFields;
+};
 
-declare function genCollection<K extends keyof GeneratedCollections | (string & {})>(
+declare function genCollection<
+	K extends keyof GeneratedCollections | (string & {}),
+>(
 	name: K,
 ): K extends keyof GeneratedCollections
-	? CollectionService<GeneratedCollections[K], GeneratedCreateData[K]>
+	? CollectionService<
+			GeneratedCollections[K],
+			GeneratedCreateData[K],
+			GeneratedQueryFields[K]
+		>
 	: CollectionService<unknown>;
 
 const genUsers = genCollection("users");
@@ -197,6 +234,26 @@ if (genUser) {
 	// @ts-expect-error password is never on the read model
 	void genUser.password;
 }
+
+// ── 7b. Hidden relation fields in filter/sort/expand/select ──
+// Hidden fields are excluded from the read model (no `record.user`) but the
+// server still resolves them for expand/filter/select — the QueryFields type
+// keeps those keys usable while the read model stays clean.
+const genPM = genCollection("project_members");
+genPM.getFullList({ expand: "user" }); // ✓ hidden relation expandable
+genPM.getFullList({ expand: "user,project" }); // ✓
+genPM.getFullList({ expand: "user.avatar" }); // ✓ dot-path
+genPM.getList(1, 20, { expand: "user" }); // ✓
+genPM.getOne("abc", { expand: "user" }); // ✓
+genPM.getList(1, 20, { filter: "user = 'x'" }); // ✓ hidden field filterable
+genPM.select("user"); // ✓ hidden field selectable
+genPM.getList(1, 20, { sort: "-created" }); // ✓ system keys still available
+// @ts-expect-error unknown expand still rejected
+genPM.getFullList({ expand: "nope" });
+// @ts-expect-error unknown filter field still rejected
+genPM.getList(1, 20, { filter: "nope = 'x'" });
+// @ts-expect-error hidden field is NOT on the read model
+void genPM.getOne("abc").then((r) => r && r.user);
 
 // ── 8. PocketBase-style realtime subscribe / unsubscribe ──
 // All PocketBase argument forms typecheck against the typed service.

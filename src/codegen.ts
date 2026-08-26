@@ -104,6 +104,26 @@ export function generateTypes(
 				body: createLines.join("\n"),
 			})}`,
 		);
+
+		// Query fields — the key set for filter/sort/expand/select. This
+		// intentionally includes hidden fields: a hidden relation is still
+		// expandable/filterable at runtime (the server resolves it) even
+		// though it is excluded from the read model. Only password fields
+		// are never queryable.
+		const queryLines: string[] = [];
+		for (const f of fields) {
+			if (f.type === "password") continue;
+			const key = fieldKey(f.name);
+			const type = fieldTypeScriptType(f);
+			if (type === "never") continue;
+			queryLines.push(`  ${JSON.stringify(key)}?: ${type};`);
+		}
+		sections.push(
+			`export interface ${typeName}QueryFields${renderInterface({
+				extends: includeBaseFields ? "BaseRecord" : undefined,
+				body: queryLines.join("\n"),
+			})}`,
+		);
 	}
 
 	// Auth collection type
@@ -132,6 +152,21 @@ ${mapEntries}
 		.join("\n");
 	sections.push(`export interface LazypockCreateData {
 ${createMapEntries}
+}`);
+
+	// Query-fields map — filter/sort/expand/select keys per collection,
+	// including hidden fields (valid at runtime despite being excluded from
+	// the read model). Auth collections get the auth system keys too.
+	const queryMapEntries = filtered
+		.map(
+			(c) =>
+				`  "${c.name}": ${collectionTypeName(c.name)}QueryFields${
+					c.type === "auth" ? " & AuthRecord" : ""
+				};`,
+		)
+		.join("\n");
+	sections.push(`export interface LazypockQueryFields {
+${queryMapEntries}
 }`);
 
 	// Runtime schema snapshot — lets the client exclude hidden fields by
@@ -193,15 +228,26 @@ export class TypedClient extends LazypockClient {
   // The (string & {}) intersection keeps the union from collapsing to plain
   // string (which would silently kill the suggestions).
   //
-  // create()/update() take the collection's *CreateData — the read model
-  // omits password/hidden fields, but the write model carries them.
+  // The service binds three types: the read model, the write-only *CreateData,
+  // and the *QueryFields (filter/sort/expand/select keys). QueryFields is what
+  // lets hidden relation fields — excluded from the read model but still
+  // expandable/filterable at runtime — typecheck:
+  //   client.collection("project_members").getFullList({ expand: "user" }) // ✓
   override collection<K extends keyof LazypockCollections | (string & {})>(
     name: K,
   ): K extends keyof LazypockCollections
-    ? CollectionService<LazypockCollections[K], LazypockCreateData[K]>
+    ? CollectionService<
+        LazypockCollections[K],
+        LazypockCreateData[K],
+        LazypockQueryFields[K]
+      >
     : CollectionService<unknown> {
     return super.collection(name) as K extends keyof LazypockCollections
-      ? CollectionService<LazypockCollections[K], LazypockCreateData[K]>
+      ? CollectionService<
+          LazypockCollections[K],
+          LazypockCreateData[K],
+          LazypockQueryFields[K]
+        >
       : CollectionService<unknown>;
   }
 }
