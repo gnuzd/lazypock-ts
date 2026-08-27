@@ -13,6 +13,7 @@ import type {
 	ReadOptions,
 	FilterString,
 	FieldKey,
+	ExpandObj,
 } from "./types";
 import type { RealtimeService } from "./realtime";
 import type { CollectionSchema } from "./schema";
@@ -292,11 +293,16 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	 * @param perPage Records per page (default 30).
 	 * @param options Query params (`filter`, `sort`, `expand`, `fields`) + request options.
 	 */
-	getList<T2 = T>(
+	getList<
+		T2 = T,
+		E extends string = never,
+		S extends string = never,
+		F extends string = never,
+	>(
 		page = 1,
 		perPage = 30,
-		options?: ListOptions<TFields> & RequestOptions,
-	): Promise<ListResult<T2> | null> {
+		options?: ListOptions<TFields, E, S, F> & RequestOptions,
+	): Promise<ListResult<T2 & { expand?: ExpandObj<E> }> | null> {
 		const {
 			requestKey,
 			autoCancel,
@@ -326,7 +332,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 				}).map(([k, v]) => [k, String(v)]),
 			),
 		).toString();
-		return this.http.get<ListResult<T2>>(
+		return this.http.get<ListResult<T2 & { expand?: ExpandObj<E> }>>(
 			"/" + this.encodeId(this.collectionName) + "?" + qs,
 			{
 				requestKey,
@@ -347,9 +353,14 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	 *
 	 * @param options Query params (`sort`, `filter`, `batch`, etc.) + request options.
 	 */
-	async getFullList<T2 = T>(
-		options?: ListOptions<TFields> & RequestOptions,
-	): Promise<Array<T2>> {
+	async getFullList<
+		T2 = T,
+		E extends string = never,
+		S extends string = never,
+		F extends string = never,
+	>(
+		options?: ListOptions<TFields, E, S, F> & RequestOptions,
+	): Promise<Array<T2 & { expand?: ExpandObj<E> }>> {
 		const { batch = 1000, ...rest } = options ?? {};
 
 		// Build a stable request key for the whole full-list fetch (NOT per page,
@@ -362,7 +373,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 				? rest.requestKey
 				: `getFullList:${this.collectionName}:${stableStringify(rest)}`;
 
-		const items: T2[] = [];
+		const items: Array<T2 & { expand?: ExpandObj<E> }> = [];
 		let page = 1;
 		for (;;) {
 			const res = await this.getList<T2>(
@@ -375,7 +386,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 				} as ListOptions<TFields> & RequestOptions,
 			);
 			if (!res || !res.items || res.items.length === 0) break;
-			items.push(...(res.items as T2[]));
+			items.push(...(res.items as Array<T2 & { expand?: ExpandObj<E> }>));
 			if (page >= (res.totalPages ?? page)) break;
 			page += 1;
 		}
@@ -388,11 +399,16 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	 * @param filter Filter expression (e.g. `title = 'x'`).
 	 * @param options Optional request options.
 	 */
-	async getFirstListItem<T2 = T>(
-		filter: FilterString<TFields>,
-		options?: ListOptions<TFields> & RequestOptions,
-	): Promise<T2 | null> {
-		const res = await this.getList<T2>(1, 1, {
+	async getFirstListItem<
+		T2 = T,
+		F extends string = never,
+		E extends string = never,
+		S extends string = never,
+	>(
+		filter: FilterString<TFields, F>,
+		options?: ListOptions<TFields, E, S, F> & RequestOptions,
+	): Promise<(T2 & { expand?: ExpandObj<E> }) | null> {
+		const res = await this.getList<T2, E, S, F>(1, 1, {
 			...options,
 			filter,
 		});
@@ -404,10 +420,10 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	 * @param id Record ID.
 	 * @param options Optional request options.
 	 */
-	getOne(
+	getOne<E extends string = never>(
 		id: string,
-		options?: ReadOptions<TFields> & RequestOptions,
-	): Promise<T | null> {
+		options?: ReadOptions<TFields, E> & RequestOptions,
+	): Promise<(T & { expand?: ExpandObj<E> }) | null> {
 		const fields = this.effectiveFields(options?.fields);
 		if (typeof options?.expand === "string") {
 			this.validateExpand(options.expand);
@@ -416,7 +432,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 		if (fields !== undefined) qs.set("fields", fields);
 		if (typeof options?.expand === "string") qs.set("expand", options.expand);
 		const qsStr = qs.toString();
-		return this.http.get<T>(
+		return this.http.get<T & { expand?: ExpandObj<E> }>(
 			"/" +
 				this.encodeId(this.collectionName) +
 				"/" +

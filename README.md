@@ -230,35 +230,52 @@ operators) at compile time — your editor suggests valid fields as you type:
 ```typescript
 await postsSvc.getList(1, 20, { sort: '-title' });        // ✓ suggests title/published/…
 await postsSvc.getList(1, 20, { sort: '-nope' });         // ✗ compile error
+await postsSvc.getList(1, 20, { sort: 'title, nope' });   // ✗ every token checked
 
 await postsSvc.getList(1, 20, {
-  filter: "title ~ 'x' && published = true", // ✓ field + operator checked
+  filter: "title ~ 'x' && published = true", // ✓ every clause field + operator checked
 });
 await postsSvc.getList(1, 20, { filter: `title=${search}` }); // ✓ spaces optional
 await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" }); // ✓ parens
 await postsSvc.getList(1, 20, { filter: "author.email = 'x'" }); // ✓ relation dot-path
 await postsSvc.getList(1, 20, { filter: 'nope = 1' });    // ✗ compile error
+await postsSvc.getList(1, 20, {
+  filter: "title = 'a' && nope = 'y'", // ✗ EVERY clause is validated
+});
 
 await postsSvc.getList(1, 20, { expand: 'author' });      // ✓ field suggested
 await postsSvc.getList(1, 20, { expand: 'author.user' }); // ✓ nested dot-path
+await postsSvc.getList(1, 20, { expand: 'author, nope' }); // ✗ every token checked
 await postsSvc.getOne('abc', { expand: 'author' });
+
+// Expanded records carry an `expand` property keyed by the requested fields:
+const posts = await postsSvc.getFullList({ expand: 'author' });
+posts[0].expand?.author; // ✓ the expanded relation (shape is `unknown`)
 ```
 
 - `filter` — `field op value` clauses with `= != ~ !~ > >= < <=` operators
   (spaces around the operator optional); `&&`, `||`, `!`, and parentheses are
-  allowed before or after the first clause; relation dot-paths like
-  `author.email = 'x'` typecheck. Field names and operators are suggested as
-  you type.
-- `sort` — `field`, `-field` (desc), `+field`, or comma-separated.
+  allowed; relation dot-paths like `author.email = 'x'` typecheck. **Every**
+  clause's field name and operator are validated — a typo in any clause is a
+  compile error, and quoted values may contain `&&`/`||` (e.g.
+  `title ~ 'a && b'`). Field names and operators are suggested as you type.
+- `sort` — `field`, `-field` (desc), `+field`, or comma-separated. **Every**
+  token is validated.
 - `expand` — comma-separated relation field names, including nested dot-paths
-  (`author.user`); non-relation fields warn at runtime when a schema is
-  available.
+  (`author.user`); **every** token is validated; non-relation fields warn at
+  runtime when a schema is available.
+
+**Expanded records are typed.** When a list/read is called with `expand`,
+the returned records include an optional `expand` object whose keys are the
+requested top-level relation fields (`record.expand.author` — dot-paths
+collapse to their first segment). The expanded value's shape belongs to the
+target collection, so it is typed `unknown`.
 
 **Hidden fields are queryable.** A hidden relation is excluded from the read
 model (no `record.user`) but the server still resolves it for
 `filter`/`sort`/`expand`/`select` — the generated `*QueryFields` type keeps
 those keys accepted, so `getFullList({ expand: "user" })` typechecks for a
-hidden relation.
+hidden relation (and `record.expand?.user` is typed on the result).
 
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`)
   still accepts any string — suggestions kick in once the service is typed.

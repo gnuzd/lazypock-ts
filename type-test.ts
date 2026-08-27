@@ -139,12 +139,68 @@ await postsSvc.getList(1, 20, { expand: "author.user" });
 // @ts-expect-error expand rejects unknown fields
 await postsSvc.getList(1, 20, { expand: "nope" });
 
+// EVERY comma-separated token is validated — not just the first one.
+await postsSvc.getList(1, 20, { expand: "author,author" });
+await postsSvc.getList(1, 20, { expand: "author, title" }); // space after comma ok
+// @ts-expect-error expand rejects an invalid second token
+await postsSvc.getList(1, 20, { expand: "author, nope" });
+// @ts-expect-error expand rejects an invalid second token (no space)
+await postsSvc.getList(1, 20, { expand: "author,nope" });
+// @ts-expect-error expand rejects an invalid third token
+await postsSvc.getList(1, 20, { expand: "author,author,nope" });
+// @ts-expect-error a dot-path cannot hide an invalid following token
+await postsSvc.getList(1, 20, { expand: "author.user,nope" });
+
+// Sort: every comma-separated token is validated too.
+await postsSvc.getList(1, 20, { sort: "title,-published" });
+// @ts-expect-error sort rejects an invalid second token
+await postsSvc.getList(1, 20, { sort: "title, nope" });
+
+// Filter: every `field op value` clause is validated, not just the first.
+await postsSvc.getList(1, 20, { filter: "title ~ 'a && b' && published = true" }); // quoted && ok
+await postsSvc.getList(1, 20, { filter: "author = 'x' && published = true" });
+// @ts-expect-error filter rejects an invalid clause field (&&)
+await postsSvc.getList(1, 20, { filter: "title = 'a' && nope = 'y'" });
+// @ts-expect-error filter rejects an invalid clause field (||)
+await postsSvc.getList(1, 20, { filter: "title = 'a' || nope = 'y'" });
+// @ts-expect-error filter rejects an invalid field inside parens
+await postsSvc.getList(1, 20, { filter: "(title = 'a' && nope = 'y')" });
+
 // untyped client: filter/sort/expand remain free-form strings
 await base.collection("posts").getList(1, 20, {
 	filter: "anything = 'x'",
 	sort: "-anything",
 	expand: "whatever",
 });
+
+// ── 6b. expanded records carry an `expand` property ──
+// Records fetched with expand expose the expanded relation data under an
+// optional `expand` key, typed with the requested top-level relation names.
+const expanded = await postsSvc.getFullList({ expand: "author" });
+if (expanded[0].expand) {
+	// ✓ the requested relation key exists (value shape belongs to the target
+	// collection, so it is `unknown`)
+	const related: unknown = expanded[0].expand.author;
+	void related;
+}
+const expandedList = await postsSvc.getList(1, 20, { expand: "author" });
+if (expandedList?.items[0].expand) {
+	expandedList.items[0].expand.author; // ✓
+}
+const expandedOne = await postsSvc.getOne("abc", { expand: "author" });
+if (expandedOne?.expand) {
+	expandedOne.expand.author; // ✓
+}
+const expandedFirst = await postsSvc.getFirstListItem("title ~ 'x'", {
+	expand: "author",
+});
+if (expandedFirst?.expand) {
+	expandedFirst.expand.author; // ✓
+}
+// The base record fields are still fully typed on the same object.
+expanded[0].title; // ✓
+// @ts-expect-error records carry expand keys, not arbitrary properties
+expanded[0].expand.nope;
 
 // ── 7. Auth collection: write-only password in create data ──
 // Mirrors what the codegen CLI emits for the built-in `users` auth
@@ -241,6 +297,10 @@ if (genUser) {
 // keeps those keys usable while the read model stays clean.
 const genPM = genCollection("project_members");
 genPM.getFullList({ expand: "user" }); // ✓ hidden relation expandable
+const genExpanded = await genPM.getFullList({ expand: "user" });
+if (genExpanded[0].expand) {
+	genExpanded[0].expand.user; // ✓ hidden relation key on the expand object
+}
 genPM.getFullList({ expand: "user,project" }); // ✓
 genPM.getFullList({ expand: "user.avatar" }); // ✓ dot-path
 genPM.getList(1, 20, { expand: "user" }); // ✓
