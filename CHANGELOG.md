@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/gnuzd/lazypock-ts/compare/v0.10.1...v0.10.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **types:** validate every expand/sort/filter token + type expanded records ([bc25cab](https://github.com/gnuzd/lazypock-ts/commit/bc25cab7818bdeca958f39e6715ec1017cc7b33e))
+
 ## [0.10.1](https://github.com/gnuzd/lazypock-ts/compare/v0.10.0...v0.10.1) (2026-08-26)
 
 
