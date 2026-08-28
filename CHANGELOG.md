@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/gnuzd/lazypock-ts/compare/v0.10.2...v0.11.0) (2026-08-28)
+
+
+### Features
+
+* **types:** typed expanded records via per-collection expand maps ([1f523d3](https://github.com/gnuzd/lazypock-ts/commit/1f523d3f71705ec19519a192be82d505fd838115))
+* **types:** typed expanded records via per-collection expand maps ([9c110b6](https://github.com/gnuzd/lazypock-ts/commit/9c110b6d3837aae0d368fadfc89f27e31e8fab9c))
+
 ## [0.10.2](https://github.com/gnuzd/lazypock-ts/compare/v0.10.1...v0.10.2) (2026-08-27)
 
 
