@@ -215,8 +215,33 @@ check(
 check(
 	"typed collection binds query fields (filter/sort/expand/select)",
 	source.includes(
-		"LazypockCreateData[K],\n        LazypockQueryFields[K]\n      >",
+		"LazypockCreateData[K],\n        LazypockQueryFields[K],\n        LazypockExpandMaps[K]\n      >",
 	),
+	true,
+);
+check(
+	"expand map generated per collection",
+	source.includes("export interface BlogPostsExpandMap") &&
+		source.includes("export interface UsersExpandMap"),
+	true,
+);
+const blogExpandBlock =
+	source.match(/export interface BlogPostsExpandMap\b[\s\S]*?\n}/)?.[0] ?? "";
+check(
+	"expand map resolves relation targets (name + id lookup)",
+	blogExpandBlock.includes('"author": UsersRecord & AuthRecord;') &&
+		blogExpandBlock.includes('"reviewer": UsersRecord & AuthRecord;'), // hidden relation too
+	true,
+);
+check(
+	"expand map excludes non-relations",
+	!blogExpandBlock.includes('"tags"') && !blogExpandBlock.includes('"title"'),
+	true,
+);
+check(
+	"expand maps bound to the client",
+	source.includes("LazypockExpandMaps[K]") &&
+		source.includes('"blog_posts": BlogPostsExpandMap;'),
 	true,
 );
 check(

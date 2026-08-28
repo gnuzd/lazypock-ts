@@ -73,6 +73,15 @@ export function generateTypes(
 }`);
 	}
 
+	// Resolve relation targets (collectionId → record type) for the expand maps.
+	// Only collections with a real id are indexed — schemas without ids (e.g.
+	// minimal hand-written snapshots) fall back to the name lookup below.
+	const collById = new Map(
+		filtered
+			.filter((c) => c.id !== undefined && c.id !== "")
+			.map((c) => [String(c.id), c]),
+	);
+
 	// One interface per collection
 	for (const coll of filtered) {
 		const typeName = collectionTypeName(coll.name);
@@ -124,6 +133,42 @@ export function generateTypes(
 				body: queryLines.join("\n"),
 			})}`,
 		);
+
+		// Expand map — relation field → target record type, so expanded
+		// records are typed (`record.expand.user` is `UsersRecord` instead of
+		// `unknown`). Built from each relation's `options.collectionId`; auth
+		// targets get `& AuthRecord`, multi-relations (maxSelect > 1) get
+		// arrays, and unknown targets (e.g. skipped collections) fall back to
+		// `unknown` via the `ExpandValue` fallback.
+		const expandLines: string[] = [];
+		for (const f of fields) {
+			if (f.type !== "relation") continue;
+			// Resolve the target collection: real PocketBase schemas carry
+			// `options.collectionId` (the target collection's id), while some
+			// tooling/snapshots use `options.collection` (the target's name).
+			// Unknown/absent targets fall back to `unknown` via ExpandValue.
+			// SAFETY: both option keys are strings; guard with String().
+			const target =
+				collById.get(String(f.options?.collectionId ?? "")) ??
+				filtered.find(
+					(c) => c.name === String(f.options?.collection ?? ""),
+				);
+			if (!target) continue;
+			const targetType = `${collectionTypeName(target.name)}Record${
+				target.type === "auth" ? " & AuthRecord" : ""
+			}`;
+			const many = (f.options?.maxSelect ?? 1) > 1;
+			expandLines.push(
+				`  ${JSON.stringify(fieldKey(f.name))}: ${
+					many ? `Array<${targetType}>` : targetType
+				};`,
+			);
+		}
+		sections.push(
+			`export interface ${typeName}ExpandMap${renderInterface({
+				body: expandLines.join("\n"),
+			})}`,
+		);
 	}
 
 	// Auth collection type
@@ -167,6 +212,15 @@ ${createMapEntries}
 		.join("\n");
 	sections.push(`export interface LazypockQueryFields {
 ${queryMapEntries}
+}`);
+
+	// Expand map — relation field → target record type per collection, bound
+	// as the 4th CollectionService generic so expanded records are typed.
+	const expandMapEntries = filtered
+		.map((c) => `  "${c.name}": ${collectionTypeName(c.name)}ExpandMap;`)
+		.join("\n");
+	sections.push(`export interface LazypockExpandMaps {
+${expandMapEntries}
 }`);
 
 	// Runtime schema snapshot — lets the client exclude hidden fields by
@@ -228,25 +282,31 @@ export class TypedClient extends LazypockClient {
   // The (string & {}) intersection keeps the union from collapsing to plain
   // string (which would silently kill the suggestions).
   //
-  // The service binds three types: the read model, the write-only *CreateData,
-  // and the *QueryFields (filter/sort/expand/select keys). QueryFields is what
-  // lets hidden relation fields — excluded from the read model but still
-  // expandable/filterable at runtime — typecheck:
+  // The service binds four types: the read model, the write-only *CreateData,
+  // the *QueryFields (filter/sort/expand/select keys), and the *ExpandMap
+  // (relation field → target record type). QueryFields is what lets hidden
+  // relation fields — excluded from the read model but still expandable/
+  // filterable at runtime — typecheck:
   //   client.collection("project_members").getFullList({ expand: "user" }) // ✓
+  // ExpandMap is what types the expanded data on the result:
+  //   const [rec] = await client.collection("posts").getFullList({ expand: "user" });
+  //   rec.expand?.user // ✓ UsersRecord, not unknown
   override collection<K extends keyof LazypockCollections | (string & {})>(
     name: K,
   ): K extends keyof LazypockCollections
     ? CollectionService<
         LazypockCollections[K],
         LazypockCreateData[K],
-        LazypockQueryFields[K]
+        LazypockQueryFields[K],
+        LazypockExpandMaps[K]
       >
     : CollectionService<unknown> {
     return super.collection(name) as K extends keyof LazypockCollections
       ? CollectionService<
           LazypockCollections[K],
           LazypockCreateData[K],
-          LazypockQueryFields[K]
+          LazypockQueryFields[K],
+          LazypockExpandMaps[K]
         >
       : CollectionService<unknown>;
   }

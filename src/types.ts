@@ -413,16 +413,26 @@ type ExpandKeys<S extends string> = S extends "" ? never :
 	S extends `${infer H},${infer T}` ? TopExpandKey<H> | ExpandKeys<T> : TopExpandKey<S>;
 
 /**
+ * Value type of one expanded relation: the target record from the expand
+ * map (`TExpand`, e.g. the codegen-generated `PostsExpandMap`) when the key
+ * is a known relation, `unknown` otherwise.
+ */
+type ExpandValue<K extends string, TExpand> = K extends keyof TExpand ? TExpand[K] : unknown;
+
+/**
  * The `expand` property attached to records when `expand` is used. Keys are
  * parsed from the caller's expand literal (dot-paths collapse to their first
- * segment), so `record.expand.user` typechecks and the nested record is
- * `unknown` (its shape belongs to the target collection). Falls back to
- * `Record<string, unknown>` when the expand value is dynamic or absent.
+ * segment) and each value is typed from `TExpand` — a per-collection map of
+ * relation field → target record type (the codegen CLI emits these), so
+ * `record.expand.user` is `UsersRecord`, not `unknown`.
+ *
+ * Falls back to `Record<string, unknown>` when the expand value is dynamic
+ * or absent, or when no expand map is bound (hand-written services).
  */
-export type ExpandObj<E extends string> =
+export type ExpandObj<E extends string, TExpand = Record<string, unknown>> =
 	[E] extends [never] ? Record<string, unknown> :
 	[string] extends [E] ? Record<string, unknown> :
-	Partial<Record<ExpandKeys<E>, unknown>>;
+	Partial<{ [K in ExpandKeys<E>]: ExpandValue<K, TExpand> }>;
 
 /**
  * Query options for list/read operations, typed against a record shape `T`.
