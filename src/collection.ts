@@ -128,8 +128,17 @@ function normalizeAction(
  * Defaults to `T`. The codegen client binds a *QueryFields type that includes
  * hidden fields — excluded from the read model but still expandable/filterable
  * at runtime — so `expand: "hiddenRelation"` typechecks.
+ * @typeParam TExpand — Map of relation field → target record type. Defaults to
+ * `Record<string, unknown>`. The codegen client binds a per-collection
+ * *ExpandMap, so `record.expand.user` is typed as the target `UsersRecord`
+ * instead of `unknown`.
  */
-export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
+export class CollectionService<
+	T = ApiRecord,
+	TData = never,
+	TFields = T,
+	TExpand = Record<string, unknown>,
+> {
 	private http: HttpClient;
 	private collectionName: string;
 	private authStore?: AuthStore;
@@ -189,9 +198,9 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	 */
 	select<K extends FieldKey<TFields> | "*">(
 		...fields: K[]
-	): CollectionService<T, TData, TFields> {
+	): CollectionService<T, TData, TFields, TExpand> {
 		const preset = fields.length === 0 ? "*" : fields.join(",");
-		const derived = new CollectionService<T, TData, TFields>(
+		const derived = new CollectionService<T, TData, TFields, TExpand>(
 			this.http,
 			this.collectionName,
 			this.authStore,
@@ -302,7 +311,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 		page = 1,
 		perPage = 30,
 		options?: ListOptions<TFields, E, S, F> & RequestOptions,
-	): Promise<ListResult<T2 & { expand?: ExpandObj<E> }> | null> {
+	): Promise<ListResult<T2 & { expand?: ExpandObj<E, TExpand> }> | null> {
 		const {
 			requestKey,
 			autoCancel,
@@ -332,7 +341,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 				}).map(([k, v]) => [k, String(v)]),
 			),
 		).toString();
-		return this.http.get<ListResult<T2 & { expand?: ExpandObj<E> }>>(
+		return this.http.get<ListResult<T2 & { expand?: ExpandObj<E, TExpand> }>>(
 			"/" + this.encodeId(this.collectionName) + "?" + qs,
 			{
 				requestKey,
@@ -360,7 +369,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 		F extends string = never,
 	>(
 		options?: ListOptions<TFields, E, S, F> & RequestOptions,
-	): Promise<Array<T2 & { expand?: ExpandObj<E> }>> {
+	): Promise<Array<T2 & { expand?: ExpandObj<E, TExpand> }>> {
 		const { batch = 1000, ...rest } = options ?? {};
 
 		// Build a stable request key for the whole full-list fetch (NOT per page,
@@ -373,7 +382,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 				? rest.requestKey
 				: `getFullList:${this.collectionName}:${stableStringify(rest)}`;
 
-		const items: Array<T2 & { expand?: ExpandObj<E> }> = [];
+		const items: Array<T2 & { expand?: ExpandObj<E, TExpand> }> = [];
 		let page = 1;
 		for (;;) {
 			const res = await this.getList<T2>(
@@ -386,7 +395,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 				} as ListOptions<TFields> & RequestOptions,
 			);
 			if (!res || !res.items || res.items.length === 0) break;
-			items.push(...(res.items as Array<T2 & { expand?: ExpandObj<E> }>));
+			items.push(...(res.items as Array<T2 & { expand?: ExpandObj<E, TExpand> }>));
 			if (page >= (res.totalPages ?? page)) break;
 			page += 1;
 		}
@@ -407,7 +416,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	>(
 		filter: FilterString<TFields, F>,
 		options?: ListOptions<TFields, E, S, F> & RequestOptions,
-	): Promise<(T2 & { expand?: ExpandObj<E> }) | null> {
+	): Promise<(T2 & { expand?: ExpandObj<E, TExpand> }) | null> {
 		const res = await this.getList<T2, E, S, F>(1, 1, {
 			...options,
 			filter,
@@ -423,7 +432,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	getOne<E extends string = never>(
 		id: string,
 		options?: ReadOptions<TFields, E> & RequestOptions,
-	): Promise<(T & { expand?: ExpandObj<E> }) | null> {
+	): Promise<(T & { expand?: ExpandObj<E, TExpand> }) | null> {
 		const fields = this.effectiveFields(options?.fields);
 		if (typeof options?.expand === "string") {
 			this.validateExpand(options.expand);
@@ -432,7 +441,7 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 		if (fields !== undefined) qs.set("fields", fields);
 		if (typeof options?.expand === "string") qs.set("expand", options.expand);
 		const qsStr = qs.toString();
-		return this.http.get<T & { expand?: ExpandObj<E> }>(
+		return this.http.get<T & { expand?: ExpandObj<E, TExpand> }>(
 			"/" +
 				this.encodeId(this.collectionName) +
 				"/" +
@@ -550,8 +559,8 @@ export class CollectionService<T = ApiRecord, TData = never, TFields = T> {
 	 * `types.schemas`). Enables schema-aware defaults: hidden fields are
 	 * excluded from responses, select/expand are validated.
 	 */
-	withSchema(schema: CollectionSchema): CollectionService<T, TData, TFields> {
-		const derived = new CollectionService<T, TData, TFields>(
+	withSchema(schema: CollectionSchema): CollectionService<T, TData, TFields, TExpand> {
+		const derived = new CollectionService<T, TData, TFields, TExpand>(
 			this.http,
 			this.collectionName,
 			this.authStore,

@@ -315,6 +315,69 @@ genPM.getList(1, 20, { filter: "nope = 'x'" });
 // @ts-expect-error hidden field is NOT on the read model
 void genPM.getOne("abc").then((r) => r && r.user);
 
+// ── 7c. typed expanded records (expand map → target record type) ──
+// The codegen CLI binds a per-collection *ExpandMap (relation field → target
+// record type) as the 4th CollectionService generic, so expanded records are
+// typed: `record.expand.user` is `UsersRecord`, not `unknown`.
+interface ExpandedPost extends Post {
+	title: string;
+	author: string;
+	user: string; // hidden relation
+}
+interface ExpandedUsers extends User {
+	email: string;
+	avatar?: string;
+}
+type GeneratedExpandedCollections = {
+	posts: ExpandedPost;
+	users: ExpandedUsers;
+};
+type GeneratedExpandedQuery = {
+	posts: ExpandedPost;
+	users: ExpandedUsers;
+};
+// The generated expand map for the posts collection: relation fields point
+// to their target record types (auth collections get the AuthRecord fields).
+type PostsExpandMap = {
+	author: ExpandedUsers;
+	user: ExpandedUsers;
+};
+type GeneratedExpandMaps = {
+	posts: PostsExpandMap;
+	users: Record<string, never>;
+};
+declare function genExpandedCollection<
+	K extends keyof GeneratedExpandedCollections | (string & {}),
+>(
+	name: K,
+): K extends keyof GeneratedExpandedCollections
+	? CollectionService<
+			GeneratedExpandedCollections[K],
+			GeneratedExpandedQuery[K],
+			GeneratedExpandedQuery[K],
+			GeneratedExpandMaps[K]
+		>
+	: CollectionService<unknown>;
+const genPosts = genExpandedCollection("posts");
+const genPostsExpanded = await genPosts.getFullList({ expand: "author,user" });
+if (genPostsExpanded[0].expand) {
+	// ✓ typed to the target record — fields accessible, not `unknown`
+	const email: string = genPostsExpanded[0].expand.author?.email ?? "";
+	const avatar = genPostsExpanded[0].expand.user?.avatar; // ✓ hidden relation typed too
+	// @ts-expect-error users records have no title
+	void genPostsExpanded[0].expand.author?.title;
+	void email;
+	void avatar;
+}
+const genPostsOne = await genPosts.getOne("abc", { expand: "author" });
+if (genPostsOne?.expand) {
+	const email: string = genPostsOne.expand.author?.email ?? "";
+	void email;
+}
+// expand keys are still fully validated
+// @ts-expect-error unknown expand rejected
+genPosts.getFullList({ expand: "author, nope" });
+
 // ── 8. PocketBase-style realtime subscribe / unsubscribe ──
 // All PocketBase argument forms typecheck against the typed service.
 postsSvc.subscribe("*", (e) => {

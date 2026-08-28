@@ -248,9 +248,10 @@ await postsSvc.getList(1, 20, { expand: 'author.user' }); // ✓ nested dot-path
 await postsSvc.getList(1, 20, { expand: 'author, nope' }); // ✗ every token checked
 await postsSvc.getOne('abc', { expand: 'author' });
 
-// Expanded records carry an `expand` property keyed by the requested fields:
+// Expanded records carry an `expand` property keyed by the requested fields,
+// typed to the target collection's record (codegen client):
 const posts = await postsSvc.getFullList({ expand: 'author' });
-posts[0].expand?.author; // ✓ the expanded relation (shape is `unknown`)
+posts[0].expand?.author?.email; // ✓ typed, not unknown
 ```
 
 - `filter` — `field op value` clauses with `= != ~ !~ > >= < <=` operators
@@ -268,14 +269,27 @@ posts[0].expand?.author; // ✓ the expanded relation (shape is `unknown`)
 **Expanded records are typed.** When a list/read is called with `expand`,
 the returned records include an optional `expand` object whose keys are the
 requested top-level relation fields (`record.expand.author` — dot-paths
-collapse to their first segment). The expanded value's shape belongs to the
-target collection, so it is typed `unknown`.
+collapse to their first segment). With the codegen client, each value is
+typed as its **target collection's record** — the generated `*ExpandMap`
+types resolve relation fields to their target record type, so
+`record.expand.user` is `UsersRecord`, not `unknown`:
+
+```typescript
+const posts = await postsSvc.getFullList({ expand: 'author' });
+posts[0].expand?.author?.email; // ✓ typed UsersRecord (auth → has email)
+```
+
+Multi-relations (`maxSelect > 1`) expand to `Array<TargetRecord>`, auth
+targets carry the `AuthRecord` fields, and unknown/unresolvable targets fall
+back to `unknown`. Hand-written services (no schema, e.g.
+`createClient<MyCollections>()`) keep `unknown` values.
 
 **Hidden fields are queryable.** A hidden relation is excluded from the read
 model (no `record.user`) but the server still resolves it for
 `filter`/`sort`/`expand`/`select` — the generated `*QueryFields` type keeps
 those keys accepted, so `getFullList({ expand: "user" })` typechecks for a
-hidden relation (and `record.expand?.user` is typed on the result).
+hidden relation (and `record.expand?.user` is typed to the target record on
+the result).
 
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`)
   still accepts any string — suggestions kick in once the service is typed.
