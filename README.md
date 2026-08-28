@@ -1,12 +1,28 @@
-# Lazypock — TypeScript SDK
+# lazypock
 
-TypeScript client library for [Lazypock](https://github.com/gnuzd/lazypock), an open-source PocketBase-compatible backend.
+[![npm version](https://img.shields.io/npm/v/lazypock.svg)](https://www.npmjs.com/package/lazypock)
+[![npm downloads](https://img.shields.io/npm/dm/lazypock.svg)](https://www.npmjs.com/package/lazypock)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/gnuzd/lazypock-ts/blob/main/LICENSE)
+[![Backend: lazypock](https://img.shields.io/badge/backend-gnuzd%2Flazypock-2f5233)](https://github.com/gnuzd/lazypock)
+
+TypeScript client SDK for **[Lazypock](https://github.com/gnuzd/lazypock)**, an open-source, PocketBase-compatible backend built on Elixir + Phoenix + PostgreSQL.
 
 ## Installation
 
 ```bash
 npm install lazypock
 ```
+
+bun / pnpm / yarn work the same way.
+
+> **Needs a running Lazypock server.** No server yet? The quickest way is:
+>
+> ```bash
+> git clone git@github.com:gnuzd/lazypock.git && cd lazypock
+> docker compose up --build
+> ```
+>
+> Studio (admin UI) + REST API will be up at `http://localhost:4000`. See the [backend README](https://github.com/gnuzd/lazypock#try-it-in-60-seconds-docker) for details, prebuilt binaries, and building from source.
 
 ## Quick Start
 
@@ -52,37 +68,26 @@ The SDK offers three levels of type safety — pick what fits your project.
 
 ### 1. Fully typed via codegen (recommended)
 
-Connect to your API once and generate a typed client — every collection becomes
-an interface with the exact field types from your schema (selects become string
-unions, relations become record IDs, etc.).
+Connect to your API once and generate a typed client — every collection becomes an interface with the exact field types from your schema (selects become string unions, relations become record IDs, etc.).
 
 ```bash
-# In your app, after installing lazypock:
-npx lazypock-gen \
+npx lazypock \
   --url http://localhost:4000/api \
   --email admin@example.com \
   --password your-password
 # writes ./lazypock.types.ts
 ```
 
-> `lazypock-gen` remains as a deprecated alias for backwards compatibility —
-> the canonical command is now simply `lazypock`:
->
-> ```bash
-> npx lazypock --url http://localhost:4000/api --email admin@example.com --password your-password
-> ```
->
-> **Use an API key instead of a password** (recommended). Generate one from the
-> Studio **Settings → API Keys** dashboard, then:
->
-> ```bash
-> npx lazypock --url http://localhost:4000/api --apikey lazypock_xxxxxxxx
-> # or via env: LAZYPOCK_URL=... LAZYPOCK_API_KEY=... npx lazypock
-> ```
->
-> API keys are stored as a SHA-256 hash (raw value shown once at generation) and
-> are scoped to collection listing — ideal for codegen (they can `GET /collections`
-> without a login round-trip, and cannot read or mutate your records).
+> `lazypock-gen` remains as a deprecated alias for backwards compatibility — the canonical command is now simply `lazypock`.
+
+**Use an API key instead of a password** (recommended). Generate one from Studio **Settings → API Keys**, then:
+
+```bash
+npx lazypock --url http://localhost:4000/api --apikey lazypock_xxxxxxxx
+# or via env: LAZYPOCK_URL=... LAZYPOCK_API_KEY=... npx lazypock
+```
+
+API keys are stored as a SHA-256 hash (raw value shown once at generation) and are scoped to collection listing — ideal for codegen (they can `GET /collections` without a login round-trip, and cannot read or mutate your records).
 
 Then in your app:
 
@@ -100,13 +105,11 @@ await client.collection('posts').create({ title: 'x' });      // ✓
 await client.collection('posts').create({ nope: 1 });          // ✗ compile error
 ```
 
-> **Dynamic collection names are fully supported.** The typed client accepts any
-> runtime string for `collection(name)` and still returns the typed service for
-> known collection names. So route params and dynamic lookups work naturally:
+> **Dynamic collection names are fully supported.** The typed client accepts any runtime string for `collection(name)` and still returns the typed service for known collection names — route params and dynamic lookups work naturally:
 >
 > ```typescript
 > function load(name: string) {
->  return client.collection(name).getList(); // ✓ works for any string
+>   return client.collection(name).getList(); // ✓ works for any string
 > }
 > ```
 
@@ -146,16 +149,35 @@ const client = new LazypockClient({
 const code = client.generateTypes(); // string — write to lazypock.types.ts
 ```
 
-> The codegen CLI emits a `lazypockSchema` snapshot next to the types, and the
-> generated `createClient()` wires it in automatically — so the schema-driven
-> behaviour below (hidden-field exclusion, query validation) works out of the box.
+The codegen CLI emits a `lazypockSchema` snapshot next to the types, and the generated `createClient()` wires it in automatically — so the schema-driven behaviour below (hidden-field exclusion, query validation) works out of the box.
 
-### Field projection (`select`) & query suggestions
+### CLI reference
 
-#### `.select(...)` — pick the fields you want
+```
+lazypock [options]
 
-`select()` projects list/read responses to the given fields (PocketBase `fields`
-param). Field names are **type-checked** when the service is typed:
+Options:
+  --url <url>        API base URL (or LAZYPOCK_URL)
+  --apikey <key>    API key (or LAZYPOCK_API_KEY) — recommended, no login round-trip
+  --api-key <key>   Deprecated alias for --apikey
+  --email <email>    Superuser email (or LAZYPOCK_EMAIL)
+  --password <pw>    Superuser password (or LAZYPOCK_PASSWORD)
+  --output <file>   Output file (default: lazypock.types.ts)
+  --out <file>      Deprecated alias for --output
+  --package <name>   Package name to import (default: lazypock)
+  --skip-system      Skip system collections
+```
+
+You must provide credentials one of two ways (or via the matching env vars):
+
+1. `--apikey` / `LAZYPOCK_API_KEY` — scoped to collection listing, no login.
+2. `--email` + `--password` / matching env vars — superuser login.
+
+## Field Projection (`select`) & Query Suggestions
+
+### `select(...)` — pick the fields you want
+
+`select()` projects list/read responses to the given fields (PocketBase `fields` param). Field names are **type-checked** when the service is typed:
 
 ```typescript
 const t = await client.collection('posts').select('id', 'title').getList();
@@ -164,16 +186,12 @@ const t = await client.collection('posts').select('id', 'title').getList();
 await client.collection('posts').select('id', 'title').getOne('abc123'); // same
 ```
 
-- `select('*')` (or no `select()` call) — request **all visible fields**; hidden
-  fields are excluded automatically when a schema is available.
+- `select('*')` (or no `select()` call) — request all visible fields; hidden fields are excluded automatically when a schema is available.
 - `select()` with no arguments resets back to the default.
-- `select()` returns a **derived service** — the original is untouched, so you
-  can keep one default service and project per-request.
+- `select()` returns a **derived service** — the original is untouched, so you can keep one default service and project per-request.
 - Passing an explicit `fields` option overrides the `select()` preset.
 
-When a schema is known (via `types.schemas` or codegen), hidden fields are
-**not returned by the server**: every read sends `fields=<visible fields>` by
-default, and selecting an unknown field logs a warning.
+When a schema is known (via `types.schemas` or codegen), hidden fields are **not returned by the server**: every read sends `fields=<visible fields>` by default, and selecting an unknown field logs a warning.
 
 #### Creating records in auth collections (write-only `password`)
 
@@ -222,7 +240,7 @@ const session = await client.authWithPassword('users', 'ada@example.com', 'corre
 const whoami = await client.me(); // fresh record via GET /api/me
 ```
 
-#### `filter` / `sort` / `expand` — type-checked suggestions
+### `filter` / `sort` / `expand` — type-checked suggestions
 
 With a typed service, the query options validate field names (and filter
 operators) at compile time — your editor suggests valid fields as you type:
@@ -294,53 +312,20 @@ the result).
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`)
   still accepts any string — suggestions kick in once the service is typed.
 
-### CLI reference
-
-```bash
-lazypock [options]
-
-Options:
-  --url <url>        API base URL (or LAZYPOCK_URL)
-  --apikey <key>    API key (or LAZYPOCK_API_KEY) — recommended, no login round-trip
-  --api-key <key>   Deprecated alias for --apikey
-  --email <email>    Superuser email (or LAZYPOCK_EMAIL)
-  --password <pw>    Superuser password (or LAZYPOCK_PASSWORD)
-  --output <file>   Output file (default: lazypock.types.ts)
-  --out <file>      Deprecated alias for --output
-  --package <name>   Package name to import (default: lazypock)
-  --skip-system      Skip system collections
-```
-
-> **Note:** `lazypock-gen` is still available as a deprecated alias.
-
-You must provide credentials one of two ways (or via the matching env vars):
-
-1. `--apikey` / `LAZYPOCK_API_KEY` — scoped to collection listing, no login.
-2. `--email` + `--password` / `LAZYPOCK_EMAIL` + `LAZYPOCK_PASSWORD` — superuser login.
-
-```
-
-
 ## API Reference
 
-### LazypockClient
+### `LazypockClient`
 
 The main client class.
 
 #### Constructor Options
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `baseUrl` | `string` | required | API base URL (e.g. `http://localhost:4000/api`) |
 | `storage` | `StorageAdapter` | `memoryStorage` | Custom storage adapter for token persistence |
 | `authStore` | `AuthStore` | auto-created | Explicit auth store instance |
 | `realtime` | `RealtimeService` | auto-created | Real-time service for WebSocket subscriptions |
-
-#### Auto-Cancellation Methods
-
-- `autoCancellation(enable)` — Globally enable/disable auto-cancellation of duplicated pending requests
-- `cancelRequest(requestKey)` — Abort a single pending request by key (default `HTTP_METHOD + path`)
-- `cancelAllRequests()` — Abort all pending requests
 
 #### Authentication Methods
 
@@ -352,7 +337,13 @@ The main client class.
 - `logout()` — Clear auth state
 - `me(options?)` — Get current superuser profile
 
-#### Collections Service (`client.collections`)
+#### Auto-Cancellation Methods
+
+- `autoCancellation(enable)` — Globally enable/disable auto-cancellation of duplicated pending requests
+- `cancelRequest(requestKey)` — Abort a single pending request by key (default `HTTP_METHOD + path`)
+- `cancelAllRequests()` — Abort all pending requests
+
+### Collections Service (`client.collections`)
 
 PocketBase-style service for the collections themselves (admin):
 
@@ -364,14 +355,17 @@ PocketBase-style service for the collections themselves (admin):
 - `collections.delete(id, options?)` — Delete collection
 - `collections.subscribe(cb)` — Subscribe to collection create/update/delete events (returns unsubscribe fn)
 - `collections.unsubscribe()` — Unsubscribe from registry events
-#### File Operations
+
+### File Operations
 
 - `files.upload(file, filename?, options?, meta?)` — Upload a file
 - `files.getUrl(fileId)` — Get file metadata
 - `files.delete(fileId, options?)` — Delete a file
 - `getFileUrl(baseUrl, fileId)` — Construct a file URL from base URL and file ID (utility)
+- `getThumbUrl(baseUrl, fileId, size)` — Construct a thumbnail URL for a pre-configured thumb size
+- `getScaleUrl(baseUrl, fileId, size)` — Construct an on-demand scaled image URL (e.g. `100x100`, `400x`)
 
-#### Realtime
+### Realtime
 
 - `realtime.connect(opts)` — Connect to WebSocket
 - `realtime.disconnect()` — Disconnect
@@ -459,10 +453,7 @@ interface RequestOptions {
 
 ## Auto Cancellation
 
-The SDK auto-cancels duplicated pending requests for you (PocketBase-compatible
-behaviour). When a new request is issued with the same request key as a
-still-pending request, the previous one is aborted — only the last request
-executes:
+The SDK auto-cancels duplicated pending requests for you (PocketBase-compatible behaviour). When a new request is issued with the same request key as a still-pending request, the previous one is aborted — only the last request executes:
 
 ```typescript
 // Only the last call will execute; the first two are auto-cancelled
@@ -471,9 +462,7 @@ await client.collection('posts').getList(2, 20); // cancelled
 await client.collection('posts').getList(3, 20); // executed
 ```
 
-By default the request key is `HTTP_METHOD + path` (e.g. `"GET /api/posts?page=1"`), so
-duplicate calls with identical URLs cancel each other. Cancelled requests reject
-with an `ApiError` whose `isAbort` is `true`:
+By default the request key is `HTTP_METHOD + path` (e.g. `"GET /api/posts?page=1"`), so duplicate calls with identical URLs cancel each other. Cancelled requests reject with an `ApiError` whose `isAbort` is `true`:
 
 ```typescript
 try {
@@ -485,10 +474,9 @@ try {
 }
 ```
 
-#### Per-request control
+### Per-request control
 
-Pass `requestKey` in the request options to customize the key, or disable
-auto-cancellation for a specific request:
+Pass `requestKey` in the request options to customize the key, or disable auto-cancellation for a specific request:
 
 ```typescript
 await client.collection('posts').getList(1, 20, { requestKey: 'my-list' }); // cancelled
@@ -498,7 +486,7 @@ await client.collection('posts').getList(1, 20, { requestKey: null });   // exec
 await client.collection('posts').getList(1, 20, { requestKey: null });   // executed
 ```
 
-#### Global control
+### Global control
 
 ```typescript
 // Disable auto-cancellation globally
@@ -509,13 +497,9 @@ client.cancelRequest('GET /api/posts?page=1');
 client.cancelAllRequests();
 ```
 
-#### Single-flight dedup (`getFullList`)
+### Single-flight dedup (`getFullList`)
 
-`getFullList()` (and `collections.getFullList()`) are **single-flight**: concurrent
-calls with the same effective options share one in-flight request instead of
-firing duplicates. This means the common pattern below results in **one**
-network request, and **both** callers resolve with the same data — no abort
-rejection:
+`getFullList()` (and `collections.getFullList()`) are **single-flight**: concurrent calls with the same effective options share one in-flight request instead of firing duplicates. This means the common pattern below results in **one** network request, and **both** callers resolve with the same data — no abort rejection:
 
 ```typescript
 const [a, b] = await Promise.all([
@@ -525,13 +509,9 @@ const [a, b] = await Promise.all([
 // one GET fired; a === b
 ```
 
-Calls with **different** options (e.g. different `sort`/`filter`) are still
-distinct requests. Multi-page fetches continue to work normally — each page
-request is unique (page number is part of the URL), so pages never cancel each
-other.
+Calls with **different** options (e.g. different `sort`/`filter`) are still distinct requests. Multi-page fetches continue to work normally — each page request is unique (page number is part of the URL), so pages never cancel each other.
 
-The underlying `singleFlight` option is also available on any request when you
-want to coalesce concurrent identical calls yourself:
+The underlying `singleFlight` option is also available on any request when you want to coalesce concurrent identical calls yourself:
 
 ```typescript
 await client.collection('posts').getList(1, 20, { singleFlight: true });
@@ -634,11 +614,7 @@ client.collection('private_feed').subscribe('*', (e) => { ... });
 
 ### Anonymous / rule-based realtime
 
-Realtime subscriptions honor your API **and list rules** — matching PocketBase
-behavior. This means **non-logged-in users can subscribe** to collections whose
-list rules are public (empty `""` string) or anon-friendly
-(`@request.auth.*` filters). The SDK auto-connects the WebSocket on first use,
-so no token is required to receive public change events:
+Realtime subscriptions honor your API **and list rules** — matching PocketBase behavior. This means **non-logged-in users can subscribe** to collections whose list rules are public (empty `""` string) or anon-friendly (`@request.auth.*` filters). The SDK auto-connects the WebSocket on first use, so no token is required to receive public change events:
 
 ```typescript
 // Works without logging in, as long as the collection's list rule allows it
