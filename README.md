@@ -7,6 +7,8 @@
 
 TypeScript client SDK for **[Lazypock](https://github.com/gnuzd/lazypock)**, an open-source, PocketBase-compatible backend built on Elixir + Phoenix + PostgreSQL.
 
+Full SDK docs (codegen, type safety, queries, realtime, files, auth): **[lazypock.gnuzd.dev/sdk/typescript](https://lazypock.gnuzd.dev/sdk/typescript)**.
+
 ## Installation
 
 ```bash
