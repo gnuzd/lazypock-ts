@@ -9,3 +9,6 @@ dist/
 .vscode
 .claude
 .pi/
+
+# Local MCP config (machine-specific paths, may contain secrets)
+.mcp.json
