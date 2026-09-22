@@ -664,12 +664,6 @@ There is no manual `workflow_dispatch` step and no local `npm publish`.
 - `feat(...)` commits → minor (`0.8.2` → `0.9.0`)
 - a `BREAKING CHANGE:` footer in any commit body → major (`0.8.2` → `1.0.0`)
 
-### One-time setup
-
-- Add an npm access token (Automation or Publish scope, from
-  <<https://www.npmjs.com/settings/><you>/tokens>) as the repo secret
-  **`NPM_TOKEN`** under Settings → Secrets and variables → Actions.
-
 ## License
 
 [MIT](LICENSE) © 2024-2025 Chris Nguyen (gnuzd)
