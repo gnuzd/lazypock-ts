@@ -18,6 +18,7 @@ interface Post {
 	title: string;
 	published: boolean;
 	author: string; // relation to users
+	tags: string[]; // multi-select / array-valued field
 }
 
 interface User {
@@ -165,6 +166,22 @@ await postsSvc.getList(1, 20, { filter: "title = 'a' && nope = 'y'" });
 await postsSvc.getList(1, 20, { filter: "title = 'a' || nope = 'y'" });
 // @ts-expect-error filter rejects an invalid field inside parens
 await postsSvc.getList(1, 20, { filter: "(title = 'a' && nope = 'y')" });
+
+// PocketBase "?" operators — "any/at least one of" over array-valued fields.
+await postsSvc.getList(1, 20, { filter: "tags ?= 'news'" });
+await postsSvc.getList(1, 20, { filter: "tags ?!= 'news'" });
+await postsSvc.getList(1, 20, { filter: "tags ?~ 'news'" });
+await postsSvc.getList(1, 20, { filter: "tags ?!~ 'news'" });
+await postsSvc.getList(1, 20, { filter: "tags ?> 1" });
+await postsSvc.getList(1, 20, { filter: "tags ?>= 1" });
+await postsSvc.getList(1, 20, { filter: "tags ?< 1" });
+await postsSvc.getList(1, 20, { filter: "tags ?<= 1" });
+// Operators need not be surrounded by spaces.
+await postsSvc.getList(1, 20, { filter: "tags?='news'" });
+// Combinable with standard clauses.
+await postsSvc.getList(1, 20, { filter: "tags ?= 'news' && published = true" });
+// @ts-expect-error ? operators still reject unknown fields
+await postsSvc.getList(1, 20, { filter: "nope ?= 'x'" });
 
 // untyped client: filter/sort/expand remain free-form strings
 await base.collection("posts").getList(1, 20, {
