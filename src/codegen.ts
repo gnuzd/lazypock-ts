@@ -12,6 +12,23 @@
 import type { CollectionSchema, SchemaField } from "./schema";
 import { fieldTypeScriptType } from "./typegen";
 
+/**
+ * Members already declared by the generated `BaseRecord` interface. A
+ * collection field with one of these names must NOT be re-declared on the
+ * per-collection read/query interfaces: redeclaring `created`/`updated`
+ * (PocketBase-style autodate fields, which the mapper types as `string`) as
+ * an optional member makes TypeScript reject the interface with TS2430
+ * ("incorrectly extends interface 'BaseRecord'") because the base declares
+ * them as required `string`. The base declaration is kept.
+ */
+const BASE_RECORD_KEYS = new Set([
+	"id",
+	"collectionId",
+	"collectionName",
+	"created",
+	"updated",
+]);
+
 /** Format a raw collection name into a valid TS identifier (PascalCase). */
 export function collectionTypeName(name: string): string {
 	return name
@@ -86,7 +103,9 @@ export function generateTypes(
 	for (const coll of filtered) {
 		const typeName = collectionTypeName(coll.name);
 		const fields = coll.fields ?? [];
-		const lines = fields.map((f) => memberLine(f)).filter((l) => l !== "");
+		const lines = fields
+			.map((f) => memberLine(f, includeBaseFields))
+			.filter((l) => l !== "");
 		const body = lines.join("\n");
 		sections.push(
 			`export interface ${typeName}Record${renderInterface({
@@ -123,6 +142,9 @@ export function generateTypes(
 		for (const f of fields) {
 			if (f.type === "password") continue;
 			const key = fieldKey(f.name);
+			// The query interface extends BaseRecord too (when base fields are
+			// emitted), so the same key collisions apply.
+			if (includeBaseFields && BASE_RECORD_KEYS.has(key)) continue;
 			const type = fieldTypeScriptType(f);
 			if (type === "never") continue;
 			queryLines.push(`  ${JSON.stringify(key)}?: ${type};`);
@@ -326,12 +348,19 @@ function renderInterface(opts: { extends?: string; body: string }): string {
 	return `${ext} {\n${opts.body}\n}`;
 }
 
-/** Render a single interface member line for a field. */
-function memberLine(f: SchemaField): string {
+/**
+ * Render a single interface member line for a field.
+ *
+ * `skipBaseKeys` is true when the interface extends `BaseRecord`: keys the
+ * base already declares are omitted so the child never redeclares them with
+ * an incompatible (optional / non-string) type.
+ */
+function memberLine(f: SchemaField, skipBaseKeys = false): string {
 	// Hidden fields are excluded from API responses by the schema-aware
 	// client default — don't expose them on the read model either.
 	if (f.hidden) return "";
 	const key = fieldKey(f.name);
+	if (skipBaseKeys && BASE_RECORD_KEYS.has(key)) return "";
 	const req = f.required || f.type === "password" ? "" : "?";
 	const type = fieldTypeScriptType(f);
 	// `never` members (passwords) are omitted from read models.

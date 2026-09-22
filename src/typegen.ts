@@ -23,6 +23,7 @@ export function fieldTypeScriptType(
 		case "editor":
 		case "date":
 		case "datetime":
+		case "autodate":
 			return "string";
 		case "number":
 			return "number";
@@ -86,6 +87,7 @@ export function fieldTypeKind(field: SchemaField): FieldTypeKind {
 		case "editor":
 		case "date":
 		case "datetime":
+		case "autodate":
 		case "select":
 		case "file":
 			return "string";

@@ -94,6 +94,11 @@ check(
 	fieldTypeScriptType({ name: "p", type: "password" }),
 	"never",
 );
+check(
+	"autodate → string",
+	fieldTypeScriptType({ name: "created_at", type: "autodate" }),
+	"string",
+);
 
 // ── 2. Identifier sanitization ──
 check("collectionTypeName users → Users", collectionTypeName("users"), "Users");
@@ -310,6 +315,76 @@ check("TypedClient class", source.includes("export class TypedClient"), true);
 check(
 	"auth intersects AuthRecord",
 	source.includes('"users": UsersRecord & AuthRecord;'),
+	true,
+);
+
+// ── 3b. BaseRecord key collisions (created/updated autodate fields) ──
+// Regression: PocketBase-style collections carry `created`/`updated` autodate
+// fields. Re-declaring them on the read/query interfaces (which extend
+// BaseRecord) produced TS2430 ("incorrectly extends interface 'BaseRecord'").
+const conflictSource = generateTypes(
+	[
+		{
+			name: "addresses",
+			type: "base",
+			fields: [
+				{ name: "fullName", type: "text" },
+				{ name: "created", type: "autodate", options: { onCreate: true } },
+				{
+					name: "updated",
+					type: "autodate",
+					options: { onCreate: true, onUpdate: true },
+				},
+				{
+					name: "created_at",
+					type: "autodate",
+					required: true,
+					system: true,
+				},
+				{
+					name: "updated_at",
+					type: "autodate",
+					required: true,
+					system: true,
+				},
+			],
+		},
+	],
+	{ packageName: "lazypock" },
+);
+
+const addressesRecordBlock =
+	conflictSource.match(/export interface AddressesRecord\b[\s\S]*?\n}/)?.[0] ?? "";
+const addressesQueryBlock =
+	conflictSource.match(
+		/export interface AddressesQueryFields\b[\s\S]*?\n}/,
+	)?.[0] ?? "";
+
+check(
+	"BaseRecord key `created` not redeclared on the read model",
+	!addressesRecordBlock.includes('"created"'),
+	true,
+);
+check(
+	"BaseRecord key `updated` not redeclared on the read model",
+	!addressesRecordBlock.includes('"updated"'),
+	true,
+);
+check(
+	"BaseRecord keys not redeclared on the query interface",
+	!addressesQueryBlock.includes('"created"') &&
+		!addressesQueryBlock.includes('"updated"'),
+	true,
+);
+check(
+	"autodate system timestamps typed as string",
+	addressesRecordBlock.includes('"created_at": string;') &&
+		addressesRecordBlock.includes('"updated_at": string;'),
+	true,
+);
+check(
+	"regular field still emitted on a colliding collection",
+	addressesRecordBlock.includes('"fullName"?: string;'),
 	true,
 );
 
