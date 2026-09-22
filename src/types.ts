@@ -149,7 +149,13 @@ export type FieldKey<T> = Extract<keyof T, string> extends never
 	? string
 	: Extract<keyof T, string>;
 
-/** Valid filter operators, matching the backend FilterCompiler. */
+/**
+ * Valid filter operators, matching the backend FilterCompiler.
+ *
+ * The `?`-prefixed operators are PocketBase's "any/at least one of"
+ * conditions over array-valued fields (multi-select, multiple relation,
+ * multiple file). They compile to `= ANY` / `ILIKE ANY` SQL in the backend.
+ */
 export type FilterOp =
 	| "="
 	| "!="
@@ -158,7 +164,15 @@ export type FilterOp =
 	| ">"
 	| ">="
 	| "<"
-	| "<=";
+	| "<="
+	| "?="
+	| "?!="
+	| "?~"
+	| "?!~"
+	| "?>"
+	| "?>="
+	| "?<"
+	| "?<=";
 
 /** Optional whitespace around a filter operator (`project=x` and `project = x` both compile). */
 type FilterWs = "" | " ";

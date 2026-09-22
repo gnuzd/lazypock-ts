@@ -258,6 +258,7 @@ await postsSvc.getList(1, 20, {
 await postsSvc.getList(1, 20, { filter: `title=${search}` }); // ✓ spaces optional
 await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" }); // ✓ parens
 await postsSvc.getList(1, 20, { filter: "author.email = 'x'" }); // ✓ relation dot-path
+await postsSvc.getList(1, 20, { filter: "tags ?= 'news'" }); // ✓ any/at-least-one-of
 await postsSvc.getList(1, 20, { filter: 'nope = 1' });    // ✗ compile error
 await postsSvc.getList(1, 20, {
   filter: "title = 'a' && nope = 'y'", // ✗ EVERY clause is validated
@@ -274,12 +275,15 @@ const posts = await postsSvc.getFullList({ expand: 'author' });
 posts[0].expand?.author?.email; // ✓ typed, not unknown
 ```
 
-- `filter` — `field op value` clauses with `= != ~ !~ > >= < <=` operators
-  (spaces around the operator optional); `&&`, `||`, `!`, and parentheses are
-  allowed; relation dot-paths like `author.email = 'x'` typecheck. **Every**
-  clause's field name and operator are validated — a typo in any clause is a
-  compile error, and quoted values may contain `&&`/`||` (e.g.
-  `title ~ 'a && b'`). Field names and operators are suggested as you type.
+- `filter` — `field op value` clauses with `= != ~ !~ > >= < <=` operators,
+  plus the PocketBase `?`-prefixed array operators `?= ?!= ?~ ?!~ ?> ?>= ?< ?<=`
+  ("any/at-least-one-of" over multi-select / multiple relation / multiple file
+  fields: `tags ?= 'news'`); spaces around the operator are optional; `&&`,
+  `||`, `!`, and parentheses are allowed; relation dot-paths like
+  `author.email = 'x'` typecheck. **Every** clause's field name and operator
+  are validated — a typo in any clause is a compile error, and quoted values
+  may contain `&&`/`||` (e.g. `title ~ 'a && b'`). Field names and operators
+  are suggested as you type.
 - `sort` — `field`, `-field` (desc), `+field`, or comma-separated. **Every**
   token is validated.
 - `expand` — comma-separated relation field names, including nested dot-paths
@@ -659,12 +663,6 @@ There is no manual `workflow_dispatch` step and no local `npm publish`.
 - `fix(...)` commits → patch (`0.8.2` → `0.8.3`)
 - `feat(...)` commits → minor (`0.8.2` → `0.9.0`)
 - a `BREAKING CHANGE:` footer in any commit body → major (`0.8.2` → `1.0.0`)
-
-### One-time setup
-
-- Add an npm access token (Automation or Publish scope, from
-  <<https://www.npmjs.com/settings/><you>/tokens>) as the repo secret
-  **`NPM_TOKEN`** under Settings → Secrets and variables → Actions.
 
 ## License
 
