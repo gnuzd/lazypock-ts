@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.0](https://github.com/gnuzd/lazypock-ts/compare/v0.11.0...v0.12.0) (2026-09-22)
+
+
+### Features
+
+* **types:** accept PocketBase ? filter operators ([74dc397](https://github.com/gnuzd/lazypock-ts/commit/74dc397e50f99e66b7d22ce68ca24fd6111feb6f))
+* **types:** accept PocketBase ? filter operators (any/at-least-one-of) ([6f5b79c](https://github.com/gnuzd/lazypock-ts/commit/6f5b79c1aa8d673cecd5284894e45e34b0eb38bb))
+
+
+### Bug Fixes
+
+* **codegen:** don't redeclare BaseRecord keys; type autodate as string ([e5e7f27](https://github.com/gnuzd/lazypock-ts/commit/e5e7f27f9c0302ec4710894c8d99d5ec0f6f673c))
+* **codegen:** don't redeclare BaseRecord keys; type autodate as string ([0fae010](https://github.com/gnuzd/lazypock-ts/commit/0fae010a332ab40f3761b684aa57fa478a0b726e))
+
 ## [0.11.0](https://github.com/gnuzd/lazypock-ts/compare/v0.10.2...v0.11.0) (2026-08-28)
 
 
