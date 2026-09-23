@@ -58,3 +58,12 @@ export type {
 export type { LazypockCollections } from "./client";
 export type { RealtimeMessage, RealtimeCallback, RealtimeSubscribeOptions } from "./collection";
 export type { CollectionsMessage } from "./collections";
+export type {
+	AuthProviderInfo,
+	AuthMethodsList,
+	OAuth2Meta,
+	RecordAuth,
+	OAuth2PopupOptions,
+	OAuth2Options,
+	OAuth2AuthCodeOptions,
+} from "./oauth2";

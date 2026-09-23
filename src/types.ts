@@ -109,13 +109,26 @@ export class ApiError extends Error {
 	 * `cancelAllRequests()` / an external AbortSignal).
 	 */
 	readonly isAbort: boolean;
+	/**
+	 * Optional machine-readable error code for branching in app code
+	 * (e.g. OAuth2 errors like `oauth2_popup_blocked`, `oauth2_timeout`, …).
+	 * HTTP errors carry the server's numeric `code` in `data` instead.
+	 */
+	readonly code?: string;
 
-	constructor(message: string, data: unknown, status: number, isAbort = false) {
+	constructor(
+		message: string,
+		data: unknown,
+		status: number,
+		isAbort = false,
+		code?: string,
+	) {
 		super(message);
 		this.name = "ApiError";
 		this.data = data;
 		this.status = status;
 		this.isAbort = isAbort;
+		this.code = code;
 	}
 }
 

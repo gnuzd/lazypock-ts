@@ -57,6 +57,10 @@ const user = await client.collection('users').create({
 const session = await client.authWithPassword('users', 'ada@example.com', 'correct-horse-battery');
 // session.token — stored in client.authStore for subsequent requests
 
+// OAuth2 login — one call: opens the provider popup and stores the session
+const oauth = await client.collection('users').authWithOAuth2({ provider: 'google' });
+// oauth.token + oauth.record + oauth.meta (isNew, email, avatarURL, …)
+
 // File upload
 const file = await client.files.upload(fileInput.files[0]);
 
@@ -399,7 +403,9 @@ Returned by `client.collection(name)`.
 - `unsubscribe(topic?)` — `unsubscribe('*')` / `unsubscribe('id')` / `unsubscribe()` (all)
 - `authWithPassword(identity, password, options?)` — Login to this auth collection
 - `authRefresh(options?)` — Refresh token for this auth collection
-- `authMethods(options?)` — Get available auth methods
+- `listAuthMethods(options?)` — Get available auth methods (password + OAuth2 providers)
+- `authWithOAuth2(options)` — Sign in with an OAuth2 provider (popup flow)
+- `authWithOAuth2Code(options)` — Exchange an OAuth2 authorization code directly
 
 ### AuthStore
 

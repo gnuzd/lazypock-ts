@@ -17,7 +17,7 @@ function isAbortError(err: unknown): boolean {
 }
 
 export class HttpClient {
-	private baseUrl: string;
+	private _baseUrl: string;
 	private authStore: AuthStore;
 	private defaultFetch: typeof globalThis.fetch;
 
@@ -51,10 +51,15 @@ export class HttpClient {
 	 * `X-Connection-Id` header on every request (realtime origin-exclusion).
 	 */
 	constructor(baseUrl: string, authStore: AuthStore, connectionId?: string) {
-		this.baseUrl = baseUrl.replace(/\/+$/, "");
+		this._baseUrl = baseUrl.replace(/\/+$/, "");
 		this.authStore = authStore;
 		this.connectionId = connectionId;
 		this.defaultFetch = globalThis.fetch.bind(globalThis);
+	}
+
+	/** The API base URL (trailing slash stripped). Used for OAuth2 origin checks. */
+	get baseUrl(): string {
+		return this._baseUrl;
 	}
 
 	private async refreshAuth(): Promise<{

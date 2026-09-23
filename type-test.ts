@@ -10,6 +10,8 @@ import {
 	createClient,
 	TypedClient,
 	type CollectionService,
+	type AuthMethodsList,
+	type OAuth2Meta,
 } from "./src/index";
 
 // A hand-rolled collections map (simulating codegen output)
@@ -418,5 +420,57 @@ postsSvc.subscribe("*", (e) => e, 123);
 postsSvc.unsubscribe("*"); // ✓ wildcard
 postsSvc.unsubscribe("abc-123"); // ✓ single record
 postsSvc.unsubscribe(); // ✓ all
+
+// ── 9. OAuth2 auth methods ──
+const oauthUserSvc = base.collection("users").typed<User>();
+
+// authWithOAuth2 resolves with a typed record + optional OAuth2 meta
+const oauthResult = await oauthUserSvc.authWithOAuth2({ provider: "google" });
+const oauthToken: string = oauthResult.token;
+const oauthRecord: User = oauthResult.record;
+const oauthMeta: OAuth2Meta | undefined = oauthResult.meta;
+void oauthToken;
+void oauthRecord;
+void oauthMeta;
+if (oauthResult.meta) {
+	const isNew: boolean = oauthResult.meta.isNew;
+	void isNew;
+}
+
+// options: popup geometry, timeout, and the urlCallback escape hatch
+void oauthUserSvc.authWithOAuth2({
+	provider: "github",
+	popup: { width: 600, height: 800 },
+	timeoutMs: 60_000,
+	urlCallback: (url) => {
+		const u: string = url;
+		void u;
+	},
+});
+// @ts-expect-error provider is required
+void oauthUserSvc.authWithOAuth2({});
+
+// authWithOAuth2Code requires code + codeVerifier
+void oauthUserSvc.authWithOAuth2Code({
+	provider: "google",
+	code: "auth-code",
+	codeVerifier: "verifier",
+});
+// @ts-expect-error code is required
+void oauthUserSvc.authWithOAuth2Code({ provider: "google", codeVerifier: "v" });
+// @ts-expect-error codeVerifier is required
+void oauthUserSvc.authWithOAuth2Code({ provider: "google", code: "c" });
+
+// listAuthMethods returns the typed providers list
+const methods: AuthMethodsList | null = await oauthUserSvc.listAuthMethods();
+if (methods) {
+	const pwd: boolean = methods.password;
+	const firstName: string = methods.oauth2.providers[0].name;
+	void pwd;
+	void firstName;
+}
+// deprecated alias still returns the typed shape
+const methodsAlias: AuthMethodsList | null = await oauthUserSvc.authMethods();
+void methodsAlias;
 
 console.log("type-test OK (compile-time checks only)");
