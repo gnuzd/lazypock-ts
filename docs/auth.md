@@ -39,6 +39,63 @@ const session = await client.authWithPassword('users', 'ada@example.com', 'corre
 // session.token — stored in client.authStore for subsequent requests
 ```
 
+## OAuth2
+
+Sign in with an OAuth2 provider (Google, GitHub, Apple, …) on an auth collection.
+
+### Popup flow (web)
+
+```typescript
+const auth = await client.collection('users').authWithOAuth2({ provider: 'google' });
+// auth.token + auth.record + auth.meta (isNew, email, avatarURL, …)
+// client.authStore is populated when the promise resolves
+```
+
+One call handles the whole flow: it fetches the provider's authorization URL,
+opens a popup, waits for the backend's redirect result (delivered via
+`postMessage`), and populates the auth store — the same result shape as
+`authWithPassword`.
+
+Options:
+
+- `provider` (required) — the provider name, e.g. `'google'`
+- `urlCallback(url)` — called with the authorization URL instead of opening a
+  popup (the presented window must preserve `window.opener`)
+- `popup: { width, height }` — popup geometry (default 500×700)
+- `timeoutMs` — abandon after this long (default 120000)
+
+### Direct code exchange (mobile / non-browser)
+
+The popup flow depends on `window.postMessage`, so on React Native (or when you
+present the URL yourself), capture the `code` from your redirect and exchange it:
+
+```typescript
+const methods = await client.collection('users').listAuthMethods();
+const google = methods?.oauth2.providers.find((p) => p.name === 'google');
+// …present google.authURL (expo-web-browser, ASWebAuthenticationSession, …)
+// …capture the redirect `code` via your deep link, then:
+const auth = await client.collection('users').authWithOAuth2Code({
+  provider: 'google',
+  code,
+  codeVerifier: google.codeVerifier,
+  createData: { /* extra fields on first sign-up */ },
+});
+```
+
+### Available providers
+
+```typescript
+const methods = await client.collection('users').listAuthMethods();
+// methods.oauth2.providers → [{ name, authURL, state, codeVerifier }]
+```
+
+### Notes
+
+- The provider's `code`/`state`/PKCE `codeVerifier` are handled by the backend —
+  the SDK never touches them in the popup flow.
+- `createData` on `authWithOAuth2` is accepted for PocketBase parity but is not
+  forwarded by the popup redirect flow; use `authWithOAuth2Code` for that.
+
 ## AuthStore
 
 Handles token persistence and auto-refresh.

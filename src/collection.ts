@@ -3,20 +3,30 @@
 
 import type { HttpClient } from "./http";
 import type { AuthStore, AuthModel } from "./auth";
-import type {
-	ApiRecord,
-	ListResult,
-	RequestOptions,
-	CreateData,
-	UpdateData,
-	ListOptions,
-	ReadOptions,
-	FilterString,
-	FieldKey,
-	ExpandObj,
+import {
+	ApiError,
+	type ApiRecord,
+	type ListResult,
+	type RequestOptions,
+	type CreateData,
+	type UpdateData,
+	type ListOptions,
+	type ReadOptions,
+	type FilterString,
+	type FieldKey,
+	type ExpandObj,
 } from "./types";
 import type { RealtimeService } from "./realtime";
 import type { CollectionSchema } from "./schema";
+import {
+	authorizeWithOAuth2Popup,
+	oauth2RedirectOrigin,
+	DEFAULT_OAUTH2_TIMEOUT_MS,
+	type AuthMethodsList,
+	type OAuth2Options,
+	type OAuth2AuthCodeOptions,
+	type RecordAuth,
+} from "./oauth2";
 
 /**
  * A recursively-normalized request value: object keys sorted and
@@ -721,16 +731,129 @@ export class CollectionService<
 	}
 
 	/**
-	 * Get available auth methods for this collection.
+	 * Get available auth methods for this collection (PocketBase `listAuthMethods`).
+	 * Returns `password`, `oauth2.providers` (each with `name`, `authURL`,
+	 * `state`, `codeVerifier`), and `mfa`.
 	 */
-	// ── end Realtime ──
-
-	async authMethods(
+	async listAuthMethods(
 		options?: RequestOptions,
-	): Promise<Record<string, unknown> | null> {
-		return this.http.get<Record<string, unknown>>(
+	): Promise<AuthMethodsList | null> {
+		return this.http.get<AuthMethodsList>(
 			"/" + this.encodeId(this.collectionName) + "/auth-methods",
 			options,
 		);
+	}
+
+	/**
+	 * Get available auth methods for this collection.
+	 * @deprecated Use {@link listAuthMethods} (typed).
+	 */
+	authMethods(options?: RequestOptions): Promise<AuthMethodsList | null> {
+		return this.listAuthMethods(options);
+	}
+
+	/**
+	 * Sign in with an OAuth2 provider (PocketBase `authWithOAuth2` parity).
+	 *
+	 * One call handles the whole web flow: fetch the provider's `authURL`,
+	 * open a popup (or call `options.urlCallback`), wait for the backend's
+	 * `postMessage` result, populate the auth store, and resolve with
+	 * `{ token, record, meta }`.
+	 *
+	 * `options.createData` is accepted for PocketBase signature parity but is
+	 * **not** forwarded by the backend's popup redirect flow — use
+	 * {@link authWithOAuth2Code} when you need extra fields on first sign-up.
+	 *
+	 * React Native / non-browser: the popup flow depends on
+	 * `window.postMessage`. Use {@link listAuthMethods} + {@link authWithOAuth2Code}
+	 * instead.
+	 */
+	async authWithOAuth2(options: OAuth2Options): Promise<RecordAuth<T>> {
+		const {
+			provider,
+			urlCallback,
+			popup,
+			timeoutMs = DEFAULT_OAUTH2_TIMEOUT_MS,
+		} = options;
+
+		const methods = await this.listAuthMethods();
+		const providerInfo = methods?.oauth2?.providers?.find(
+			(p) => p.name === provider,
+		);
+		if (!providerInfo) {
+			throw new ApiError(
+				`OAuth2 provider "${provider}" is not enabled for this collection.`,
+				methods ?? {},
+				400,
+				false,
+				"oauth2_unknown_provider",
+			);
+		}
+
+		const result = await authorizeWithOAuth2Popup({
+			authURL: providerInfo.authURL,
+			expectedOrigin: oauth2RedirectOrigin(this.http.baseUrl),
+			urlCallback,
+			popup,
+			timeoutMs,
+		});
+
+		if (this.authStore) {
+			this.authStore.setCollectionName(this.collectionName);
+			// SAFETY: the server's auth response record is a superset of
+			// AuthModel; the auth store consumes it generically.
+			this.authStore.set(result.token, result.record as unknown as AuthModel);
+		}
+		// SAFETY: `result.record` is the server's auth record for this
+		// collection; it satisfies `T` at runtime — `T` is a compile-time
+		// lens only.
+		return result as unknown as RecordAuth<T>;
+	}
+
+	/**
+	 * Exchange an OAuth2 authorization code directly (PocketBase
+	 * `authWithOAuth2Code` parity).
+	 *
+	 * Used by mobile / non-browser flows: fetch {@link listAuthMethods} to get
+	 * the provider `authURL` + `codeVerifier`, present the URL yourself,
+	 * capture the `code` from your redirect/deep link, then call this to
+	 * finish and populate the auth store.
+	 */
+	async authWithOAuth2Code(
+		options: OAuth2AuthCodeOptions,
+	): Promise<RecordAuth<T>> {
+		const { provider, code, codeVerifier, redirectUrl, createData } = options;
+
+		const data = await this.http.post<RecordAuth<ApiRecord>>(
+			"/" + this.encodeId(this.collectionName) + "/auth-with-oauth2",
+			{
+				provider,
+				code,
+				codeVerifier,
+				redirectUrl: redirectUrl ?? this.http.baseUrl + "/oauth2-redirect",
+				createData: createData ?? {},
+			},
+		);
+
+		if (!data) {
+			throw new ApiError(
+				"OAuth2 code exchange returned no data.",
+				{},
+				0,
+				false,
+				"oauth2_exchange_failed",
+			);
+		}
+
+		if (this.authStore) {
+			this.authStore.setCollectionName(this.collectionName);
+			// SAFETY: the server's auth response record is a superset of
+			// AuthModel; the auth store consumes it generically.
+			this.authStore.set(data.token, data.record as unknown as AuthModel);
+		}
+		// SAFETY: `data.record` is the server's auth record for this
+		// collection; it satisfies `T` at runtime — `T` is a compile-time
+		// lens only.
+		return data as unknown as RecordAuth<T>;
 	}
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* **auth:** add OAuth2 sign-in — `authWithOAuth2` (popup flow), `authWithOAuth2Code` (direct code exchange), and typed `listAuthMethods`
+
 ## [0.12.0](https://github.com/gnuzd/lazypock-ts/compare/v0.11.0...v0.12.0) (2026-09-22)
 
 

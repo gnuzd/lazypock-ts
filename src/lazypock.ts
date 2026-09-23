@@ -237,6 +237,8 @@ export class LazypockClient {
 	 * @experimental
 	 */
 	collectionFor<TRecord = ApiRecord>(name: string): CollectionService<TRecord> {
+		// SAFETY: TRecord is a compile-time lens only — the service is
+		// collection-agnostic at runtime.
 		return this.collection(name) as unknown as CollectionService<TRecord>;
 	}
 
@@ -342,6 +344,8 @@ export class LazypockClient {
 			});
 			if (data && data.record) {
 				this.authStore.setCollectionName(collection);
+				// SAFETY: the server's auth response record is a superset of
+				// AuthModel; the auth store consumes it generically.
 				this.authStore.set(data.token, data.record as unknown as AuthModel);
 			}
 		} else {
@@ -379,6 +383,8 @@ export class LazypockClient {
 		const data = await this.http.get<T>("/me", options);
 		if (data) {
 			// Update the auth model with fresh data
+			// SAFETY: `data` is the current identity record; it satisfies
+			// AuthModel structurally.
 			this.authStore.set(this.authStore.token, data as unknown as AuthModel);
 		}
 		return data;
@@ -410,6 +416,8 @@ export class LazypockClient {
 		);
 		if (data) {
 			this.authStore.setCollectionName(collection);
+			// SAFETY: the server's auth response record is a superset of
+			// AuthModel; the auth store consumes it generically.
 			this.authStore.set(data.token, data.record as unknown as AuthModel);
 		}
 		return data;
@@ -437,6 +445,8 @@ export class LazypockClient {
 		);
 		if (data) {
 			this.authStore.setCollectionName(collection);
+			// SAFETY: the server's auth response record is a superset of
+			// AuthModel; the auth store consumes it generically.
 			this.authStore.set(data.token, data.record as unknown as AuthModel);
 		}
 		return data;
