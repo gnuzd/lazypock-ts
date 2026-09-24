@@ -6,6 +6,14 @@
 
 * **auth:** add OAuth2 sign-in — `authWithOAuth2` (popup flow), `authWithOAuth2Code` (direct code exchange), and typed `listAuthMethods`
 
+## [0.13.0](https://github.com/gnuzd/lazypock-ts/compare/v0.12.0...v0.13.0) (2026-09-23)
+
+
+### Features
+
+* **auth:** add OAuth2 sign-in (authWithOAuth2 + authWithOAuth2Code) ([2ce103d](https://github.com/gnuzd/lazypock-ts/commit/2ce103d90e0cbc3130f6081e4cdac63824738952))
+* **auth:** add OAuth2 sign-in (authWithOAuth2 + authWithOAuth2Code) ([ca59665](https://github.com/gnuzd/lazypock-ts/commit/ca5966533ca356654a90ab9dca6af1c350fefccd))
+
 ## [0.12.0](https://github.com/gnuzd/lazypock-ts/compare/v0.11.0...v0.12.0) (2026-09-22)
 
 
