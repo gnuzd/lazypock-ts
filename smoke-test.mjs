@@ -1106,6 +1106,286 @@ await (async () => {
 			true,
 		);
 	}
+
+	// users schema so relation targets can be resolved across collections
+	const usersSchema = {
+		name: "users",
+		type: "auth",
+		fields: [
+			{ name: "name", type: "text" },
+			{ name: "email", type: "email" },
+			{ name: "manager", type: "relation", options: { collection: "users" } },
+		],
+	};
+
+	// 9. expand field selection — a dotted tail that is not a relation is
+	// rewritten to PocketBase's `expand` + `fields=expand.<rel>.<field>` form
+	// (raw `expand=owner.name` is silently dropped by the server).
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "author.name,author.email" });
+		check(
+			"expand('author.name,author.email') → expand=author (dotted tails dropped)",
+			lastUrl().includes("expand=author") && !lastUrl().includes("expand=author.name"),
+			true,
+		);
+		check(
+			"expand field selection → fields carries expand.author.{name,email}",
+			lastUrl().includes("expand.author.name") &&
+				lastUrl().includes("expand.author.email"),
+			true,
+		);
+	}
+
+	// 10. a dotted tail that IS a relation keeps nested-expand behaviour
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "author.manager" });
+		check(
+			"expand('author.manager') keeps every relation prefix (author first)",
+			lastUrl().includes("expand=author%2Cauthor.manager"),
+			true,
+		);
+		check(
+			"nested expand adds expand.author to fields (not the leaf path)",
+			lastUrl().includes("expand.author") &&
+				!lastUrl().includes("expand.author.manager"),
+			true,
+		);
+	}
+
+	// 11. plain expand survives the schema-default field projection
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema] },
+		});
+		await c.collection("posts").getList(1, 20, { fetch: fetchMock, expand: "author" });
+		check(
+			"plain expand + schema projection keeps expand.author in fields",
+			lastUrl().includes("expand.author") && lastUrl().includes("expand=author"),
+			true,
+		);
+	}
+
+	// 12. no schema: two+ dotted tokens under one relation → field selection
+	{
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "author.name,author.email" });
+		check(
+			"no-schema expand('author.name,author.email') → expand=author, no fields param",
+			lastUrl().includes("expand=author") && !lastUrl().includes("fields="),
+			true,
+		);
+	}
+
+	// 13. no schema: a lone dotted token stays a nested relation (with a warning)
+	{
+		const warns = [];
+		const origWarn = console.warn;
+		console.warn = (...a) => warns.push(a.join(" "));
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "author.manager" });
+		console.warn = origWarn;
+		check(
+			"no-schema single dotted token → expand=author,author.manager (nested)",
+			lastUrl().includes("expand=author%2Cauthor.manager"),
+			true,
+		);
+		check(
+			"no-schema single dotted token warns about ambiguity",
+			warns.some((w) => w.includes("treated as a nested relation")),
+			true,
+		);
+	}
+
+	// 14. array shorthands for sort / expand join to the comma form
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, sort: ["-title", "published"] });
+		check(
+			"sort array joins to sort=-title,published",
+			lastUrl().includes("sort=-title%2Cpublished"),
+			true,
+		);
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: ["author"] });
+		check(
+			"expand array joins + keeps expand.author",
+			lastUrl().includes("expand=author") && lastUrl().includes("expand.author"),
+			true,
+		);
+		await c
+			.collection("posts")
+			.getList(1, 20, {
+				fetch: fetchMock,
+				expand: ["author.name", "author.email"],
+			});
+		check(
+			"expand array field selection rewrites to expand=author + fields",
+			lastUrl().includes("expand=author") &&
+				lastUrl().includes("expand.author.name"),
+			true,
+		);
+	}
+
+	// 15. typed filter builder — field/operator methods, safe escaping
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		const svc = c.collection("posts");
+		const q = svc.where;
+
+		check("where eq builds field = value", q("title").eq("x").toString(), "title = 'x'");
+		check(
+			"where escapes single quotes",
+			q("title").contains("it's").toString(),
+			"title ~ 'it\\'s'",
+		);
+		check(
+			"where and() wraps and joins with &&",
+			q("title").eq("a").and(q("published").eq(true)).toString(),
+			"(title = 'a' && published = true)",
+		);
+		check(
+			"where or()/not()",
+			q("title").eq("a").or(q("title").eq("b")).not().toString(),
+			"!((title = 'a' || title = 'b'))",
+		);
+		check(
+			"where anyContains() uses the ?~ operator",
+			q("title").anyContains("news").toString(),
+			"title ?~ 'news'",
+		);
+		check("where eq(null) emits null", q("title").eq(null).toString(), "title = null");
+		check(
+			"where in() builds an OR chain",
+			q("id").in(["a", "b", "c"]).toString(),
+			"(id = 'a' || id = 'b' || id = 'c')",
+		);
+		check(
+			"where notIn() builds an AND chain",
+			q("id").notIn(["a", "b"]).toString(),
+			"(id != 'a' && id != 'b')",
+		);
+		check(
+			"where in() escapes values",
+			q("id").in(["a'b"]).toString(),
+			"(id = 'a\\'b')",
+		);
+		check(
+			"where in() composes with and() without precedence bugs",
+			q("id").in(["a", "b"]).and(q("title").eq("x")).toString(),
+			"((id = 'a' || id = 'b') && title = 'x')",
+		);
+		let inThrew = false;
+		try {
+			q("id").in([]);
+		} catch {
+			inThrew = true;
+		}
+		check("where in([]) throws", inThrew, true);
+
+		await svc.getList(1, 20, {
+			fetch: fetchMock,
+			filter: q("title").eq("a").and(q("published").eq(true)),
+		});
+		check(
+			"filter accepts a FilterExpr",
+			lastUrl().includes("filter=") && lastUrl().includes("published"),
+			true,
+		);
+	}
+
+	// 16. client-side field selection on expanded records (servers that always
+	// return the full related record, e.g. the LazyPock server)
+	{
+		const expandedItems = {
+			items: [
+				{
+					id: "1",
+					author: "u1",
+					expand: {
+						author: {
+							id: "u1",
+							name: "Ada",
+							email: "ada@x.com",
+							avatar: "a.png",
+							created: "c",
+							updated: "u",
+						},
+					},
+				},
+			],
+			page: 1,
+			perPage: 30,
+			totalItems: 1,
+			totalPages: 1,
+		};
+		const expandedFetch = async () => ({
+			ok: true,
+			status: 200,
+			text: async () => JSON.stringify(expandedItems),
+		});
+		const oneFetch = async () => ({
+			ok: true,
+			status: 200,
+			text: async () => JSON.stringify(expandedItems.items[0]),
+		});
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		const list = await c
+			.collection("posts")
+			.getList(1, 20, { fetch: expandedFetch, expand: "author.name,author.email" });
+		const rec = list.items[0];
+		check(
+			"client-side expand narrowing keeps only requested fields",
+			JSON.stringify(Object.keys(rec.expand.author).sort()),
+			JSON.stringify(["email", "name"]),
+		);
+		const one = await c
+			.collection("posts")
+			.getOne("1", { fetch: oneFetch, expand: ["author.name"] });
+		check(
+			"client-side expand narrowing applies to getOne too",
+			JSON.stringify(Object.keys(one.expand.author)),
+			JSON.stringify(["name"]),
+		);
+		// A full (non-dotted) expand is left untouched.
+		const fullList = await c
+			.collection("posts")
+			.getList(1, 20, { fetch: expandedFetch, expand: "author" });
+		const full = fullList.items[0];
+		check(
+			"plain expand is not narrowed client-side",
+			"email" in full.expand.author && "avatar" in full.expand.author,
+			true,
+		);
+	}
 })();
 
 console.log(

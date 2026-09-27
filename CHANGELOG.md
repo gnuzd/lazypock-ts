@@ -5,6 +5,25 @@
 ### Features
 
 * **auth:** add OAuth2 sign-in — `authWithOAuth2` (popup flow), `authWithOAuth2Code` (direct code exchange), and typed `listAuthMethods`
+* **queries:** accept arrays for `sort` and `expand` (`sort: ["-title", "published"]`) so editors suggest each field
+* **queries:** add a typed filter builder — `svc.where("title").contains("x").and(svc.where("published").eq(true))`
+  checks field names/operators (including relation dot-paths), escapes values, and works anywhere a
+  `filter` string is accepted; `svc.where("id").in([...])` / `.notIn([...])` cover list membership
+  without hand-written OR chains
+
+### Bug Fixes
+
+* **expand:** keep expanded records when a `fields` projection is active (schema
+  default, `select(...)`, or explicit `fields`) — the strict `fields` param no
+  longer silently drops `expand`
+* **expand:** support field selection via dotted tokens
+  (`expand: "owner.name,owner.email"`) — the relation is expanded and only the
+  requested fields are kept. Applied client-side so it works on the LazyPock
+  server (which always returns the full related record) as well as PocketBase;
+  dotted paths that are all relations keep their nested-expand meaning
+* **expand:** never emit `fields=*` plus other tokens — the LazyPock server
+  treats that as a strict projection and returned empty records; the relation
+  field and `expand.<key>` entries are merged into an explicit projection instead
 
 ## [0.13.0](https://github.com/gnuzd/lazypock-ts/compare/v0.12.0...v0.13.0) (2026-09-23)
 
