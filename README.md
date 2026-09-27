@@ -296,13 +296,15 @@ a compile error:
 ```typescript
 await postsSvc.getList(1, 20, { filter: "title ~ 'hello' && published = true" });
 await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" });
-await postsSvc.getList(1, 20, { filter: "tags ?= 'news'" });     // any array element
+await postsSvc.getList(1, 20, { filter: "tags ?= 'news'" }); // any array element
+await postsSvc.getList(1, 20, { filter: "author.email = 'ada@example.com'" });
+await postsSvc.getList(1, 20, { filter: "deleted_at = null" }); // IS NULL
 ```
 
-> **Filter fields are top-level.** To filter by a relation, compare it with
-> the related record's id (`author = 'USER_ID'`). Relation dot-paths
-> (`author.email = 'x'`) are PocketBase syntax but the LazyPock filter engine
-> does not compile them (HTTP `400`).
+> **Relation dot-paths** (`author.email = 'x'`, including multi-level paths)
+> and `field = null` / `field != null` are supported by current LazyPock
+> servers. On older servers a dot-path filter is rejected with HTTP `400` —
+> filter by the relation id (`author = 'USER_ID'`) instead.
 
 | Operator | Meaning |
 | --- | --- |
@@ -328,6 +330,7 @@ q('id').in(['a', 'b', 'c']);    // (id = 'a' || id = 'b' || id = 'c')  — list 
 q('id').notIn(['a', 'b']);      // (id != 'a' && id != 'b')
 q('tags').anyEq('news');        // any array element equals
 q('author').eq(userId);         // filter by relation id
+q('author.email').eq('ada@example.com'); // relation dot-path (null + != supported too)
 
 // combine — and() / or() / not()
 q('title').contains('x').and(q('published').eq(true)); // (… && …)

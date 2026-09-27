@@ -90,13 +90,15 @@ await postsSvc.getList(1, 20, { filter: "published = true" });
 await postsSvc.getList(1, 20, { filter: "views >= 100" });
 await postsSvc.getList(1, 20, { filter: "title ~ 'a' && published = true" });
 await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" });
+await postsSvc.getList(1, 20, { filter: "author.email = 'ada@example.com'" });
+await postsSvc.getList(1, 20, { filter: "deleted_at = null" }); // IS NULL
 ```
 
-> **Filter fields are top-level collection fields.** To filter by a relation,
-> compare the relation field with the related record's id
-> (`author = 'USER_ID'`). Relation *dot-paths* (`author.email = 'x'`) are part
-> of PocketBase's syntax but the LazyPock filter engine does not compile them
-> (it returns `400 Invalid filter expression`), so avoid them.
+> **Relation dot-paths** (`author.email = 'x'`, including multi-level paths
+> and multi-relations) and **null checks** (`field = null` /
+> `field != null`) are supported by current LazyPock servers. On an older
+> server a dot-path filter is rejected with `400 Invalid filter expression`;
+> filter by the relation id (`author = 'USER_ID'`) instead.
 
 #### Operators
 
@@ -328,11 +330,10 @@ const posts = await postsSvc.getFullList({
 });
 ```
 
-> To filter on a field *of* the related record, resolve the related id first
-> and filter by the relation (`q('author').eq(userId)`), or filter against a
-> denormalized copy of that field. The LazyPock filter engine compiles
-> top-level fields only — relation dot-paths (`author.email = 'x'`) return
-> `400`.
+> To filter on a field *of* the related record, use a relation dot-path —
+> `q('author.email').eq(email)` or `"author.email = 'x'"`. This compiles to a
+> correlated subquery (requires a server with relation dot-path support).
+> `field = null` / `field != null` select empty / non-empty values.
 
 ### Filter by status, newest first, expand the author
 

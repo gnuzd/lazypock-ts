@@ -54,6 +54,7 @@ export type {
 	ExpandString,
 	FilterOp,
 	FieldKey,
+	FilterableKey,
 	// options
 	LazypockClientOptions,
 } from "./lazypock";

@@ -183,6 +183,10 @@ await postsSvc.getList(1, 20, { filter: postsSvc.where("tags").anyEq("news") });
 // List membership — no hand-written OR chains.
 await postsSvc.getList(1, 20, { filter: postsSvc.where("id").in(["a", "b", "c"]) });
 await postsSvc.getList(1, 20, { filter: postsSvc.where("id").notIn(["a", "b"]) });
+// Relation dot-paths work in the builder too.
+await postsSvc.getList(1, 20, { filter: postsSvc.where("author.email").contains("x") });
+// @ts-expect-error where rejects a dot-path whose first segment is unknown
+postsSvc.where("nope.email");
 await postsSvc.getFirstListItem(postsSvc.where("title").eq("a"));
 // @ts-expect-error where rejects unknown fields
 postsSvc.where("nope");
