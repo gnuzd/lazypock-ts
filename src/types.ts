@@ -1,5 +1,7 @@
 // ── Record & Collection types ───────────────────────────
 
+import type { FilterExpr } from "./filter";
+
 /**
  * Base shape every record returned from any collection satisfies.
  * Generated record interfaces extend this.
@@ -242,7 +244,7 @@ type PathBan = " " | "&" | "|" | "(" | ")" | "'" | "\"";
  * segments reference fields of the *target* collection, which `T` doesn't
  * describe.
  */
-type ExpandField<T> = `${FieldKey<T>}${"" | `.${string}`}`;
+export type ExpandField<T> = `${FieldKey<T>}${"" | `.${string}`}`;
 
 /**
  * Validate every comma-separated expand token; returns the original literal
@@ -273,7 +275,7 @@ export type ExpandString<T, E extends string = never> = E & (E extends ValidExpa
 // ── sort ───────────────────────────────────────────────
 
 /** A single `[+|-]field` sort token. */
-type SortField<T> = `${"" | "-" | "+"}${FieldKey<T>}`;
+export type SortField<T> = `${"" | "-" | "+"}${FieldKey<T>}`;
 
 /**
  * Validate every comma-separated sort token; returns the original literal
@@ -480,15 +482,17 @@ export interface ListOptions<_T = ApiRecord, E extends string = never, S extends
 	 * PocketBase filter expression. Field names + operators are type-checked
 	 * when `T` is a concrete shape.
 	 */
-	filter?: FilterString<_T, F>;
+	filter?: FilterString<_T, F> | FilterExpr;
 	/**
-	 * Sort field(s): `field`, `-field` (descending), comma-separated.
+	 * Sort field(s): `field`, `-field` (descending). Either a
+	 * comma-separated string or an array whose elements are field-checked.
 	 */
-	sort?: SortString<_T, S>;
+	sort?: SortString<_T, S> | SortField<_T>[];
 	/**
-	 * Comma-separated relation field names to expand.
+	 * Relation field(s) to expand — a comma-separated string or an array
+	 * whose elements are field-checked (dot-paths allowed).
 	 */
-	expand?: ExpandString<_T, E>;
+	expand?: ExpandString<_T, E> | ExpandField<_T>[];
 	/**
 	 * Explicit field projection (overrides {@link CollectionService.select}).
 	 */
@@ -503,8 +507,9 @@ export interface ListOptions<_T = ApiRecord, E extends string = never, S extends
  * Options for single-record reads (`getOne`): expand + explicit fields.
  */
 export interface ReadOptions<_T = ApiRecord, E extends string = never> {
-	/** Comma-separated relation field names to expand. */
-	expand?: ExpandString<_T, E>;
+	/** Relation field(s) to expand — a comma-separated string or a
+	 * field-checked array. */
+	expand?: ExpandString<_T, E> | ExpandField<_T>[];
 	/** Explicit field projection (overrides {@link CollectionService.select}). */
 	fields?: string;
 }

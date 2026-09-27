@@ -17,6 +17,7 @@ import {
 	type ExpandObj,
 } from "./types";
 import type { RealtimeService } from "./realtime";
+import { FilterBuilder, type FilterExpr } from "./filter";
 import type { CollectionSchema, SchemaField } from "./schema";
 import {
 	authorizeWithOAuth2Popup,
@@ -312,6 +313,31 @@ export class CollectionService<
 		].join(",");
 	}
 
+	// ── Typed filter builder ──
+
+	/**
+	 * Start a type-checked filter expression. The field name is suggested
+	 * from the collection's key set and the value is checked against the
+	 * field's type (when the service is typed). Values are escaped safely.
+	 *
+	 * ```ts
+	 * const q = posts.where;
+	 * await posts.getList(1, 20, {
+	 *   filter: q("title").contains("x").and(q("published").eq(true)),
+	 * });
+	 * // → filter=(title ~ '%x%' && published = true)
+	 *
+	 * // PocketBase `?` array operators (multi-select / multi-relation):
+	 * posts.getList(1, 20, { filter: q("tags").anyEq("news") });
+	 * ```
+	 *
+	 * Chain `.and()` / `.or()` / `.not()` to compose. A `FilterExpr` can be
+	 * passed anywhere a `filter` string is accepted.
+	 */
+	where<F extends FieldKey<TFields>>(field: F): FilterBuilder<F> {
+		return new FilterBuilder<F>(field);
+	}
+
 	/**
 	 * Resolve the leading relation chain of an expand token against the
 	 * (optionally schema-aware) collection graph.
@@ -573,6 +599,15 @@ export class CollectionService<
 			params,
 			...queryParams
 		} = options ?? {};
+		// Array shorthands (`sort: ["-title"]`, `expand: ["author"]`) join to
+		// the comma-separated form the server expects.
+		if (Array.isArray(queryParams.sort)) {
+			(queryParams as Record<string, unknown>).sort = queryParams.sort.join(",");
+		}
+		if (Array.isArray(queryParams.expand)) {
+			(queryParams as Record<string, unknown>).expand =
+				queryParams.expand.join(",");
+		}
 		// Normalise `expand`: dotted tokens that select fields of a relation are
 		// rewritten to PocketBase's `expand` + `fields=expand.<rel>.<field>`
 		// form (raw `expand=owner.name` is silently ignored by the server).
@@ -673,7 +708,7 @@ export class CollectionService<
 		E extends string = never,
 		S extends string = never,
 	>(
-		filter: FilterString<TFields, F>,
+		filter: FilterString<TFields, F> | FilterExpr,
 		options?: ListOptions<TFields, E, S, F> & RequestOptions,
 	): Promise<(T2 & { expand?: ExpandObj<E, TExpand> }) | null> {
 		const res = await this.getList<T2, E, S, F>(1, 1, {
@@ -692,17 +727,21 @@ export class CollectionService<
 		id: string,
 		options?: ReadOptions<TFields, E> & RequestOptions,
 	): Promise<(T & { expand?: ExpandObj<E, TExpand> }) | null> {
-		const expandInfo = this.normalizeExpand(
-			typeof options?.expand === "string" ? options.expand : undefined,
-		);
+		let rawExpand: string | undefined;
+		if (Array.isArray(options?.expand)) {
+			rawExpand = options.expand.join(",");
+		} else if (typeof options?.expand === "string") {
+			rawExpand = options.expand;
+		}
+		const expandInfo = this.normalizeExpand(rawExpand);
 		const fields = this.mergeExpandFields(
 			this.effectiveFields(options?.fields),
 			expandInfo,
 		);
 		const qs = new URLSearchParams();
 		if (fields !== undefined) qs.set("fields", fields);
-		if (typeof options?.expand === "string") {
-			qs.set("expand", expandInfo.expand ?? options.expand);
+		if (rawExpand !== undefined) {
+			qs.set("expand", expandInfo.expand ?? rawExpand);
 		}
 		const qsStr = qs.toString();
 		return this.http.get<T & { expand?: ExpandObj<E, TExpand> }>(

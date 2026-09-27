@@ -162,6 +162,28 @@ await postsSvc.getList(1, 20, { sort: "title,-published" });
 // @ts-expect-error sort rejects an invalid second token
 await postsSvc.getList(1, 20, { sort: "title, nope" });
 
+// Array shorthands — field-checked and editor-suggested (no template literals).
+await postsSvc.getList(1, 20, { sort: ["-title", "published"] });
+await postsSvc.getList(1, 20, { expand: ["author"] });
+await postsSvc.getList(1, 20, { expand: ["author.user"] });
+// @ts-expect-error sort array rejects unknown fields
+await postsSvc.getList(1, 20, { sort: ["-nope"] });
+// @ts-expect-error expand array rejects unknown fields
+await postsSvc.getList(1, 20, { expand: ["nope"] });
+
+// Typed filter builder — field + operator checked, values escaped.
+await postsSvc.getList(1, 20, { filter: postsSvc.where("title").contains("x") });
+await postsSvc.getList(1, 20, {
+  filter: postsSvc.where("title").eq("a").and(postsSvc.where("published").eq(true)),
+});
+await postsSvc.getList(1, 20, {
+  filter: postsSvc.where("title").eq("a").or(postsSvc.where("title").eq("b")).not(),
+});
+await postsSvc.getList(1, 20, { filter: postsSvc.where("tags").anyEq("news") });
+await postsSvc.getFirstListItem(postsSvc.where("title").eq("a"));
+// @ts-expect-error where rejects unknown fields
+postsSvc.where("nope");
+
 // Filter: every `field op value` clause is validated, not just the first.
 await postsSvc.getList(1, 20, { filter: "title ~ 'a && b' && published = true" }); // quoted && ok
 await postsSvc.getList(1, 20, { filter: "author = 'x' && published = true" });
@@ -207,22 +229,22 @@ if (expanded[0].expand) {
 }
 const expandedList = await postsSvc.getList(1, 20, { expand: "author" });
 if (expandedList?.items[0].expand) {
-	expandedList.items[0].expand.author; // ✓
+	void expandedList.items[0].expand.author; // ✓
 }
 const expandedOne = await postsSvc.getOne("abc", { expand: "author" });
 if (expandedOne?.expand) {
-	expandedOne.expand.author; // ✓
+	void expandedOne.expand.author; // ✓
 }
 const expandedFirst = await postsSvc.getFirstListItem("title ~ 'x'", {
 	expand: "author",
 });
 if (expandedFirst?.expand) {
-	expandedFirst.expand.author; // ✓
+	void expandedFirst.expand.author; // ✓
 }
 // The base record fields are still fully typed on the same object.
-expanded[0].title; // ✓
+void expanded[0].title; // ✓
 // @ts-expect-error records carry expand keys, not arbitrary properties
-expanded[0].expand.nope;
+void expanded[0].expand.nope;
 
 // ── 7. Auth collection: write-only password in create data ──
 // Mirrors what the codegen CLI emits for the built-in `users` auth
@@ -321,7 +343,7 @@ const genPM = genCollection("project_members");
 genPM.getFullList({ expand: "user" }); // ✓ hidden relation expandable
 const genExpanded = await genPM.getFullList({ expand: "user" });
 if (genExpanded[0].expand) {
-	genExpanded[0].expand.user; // ✓ hidden relation key on the expand object
+	void genExpanded[0].expand.user; // ✓ hidden relation key on the expand object
 }
 genPM.getFullList({ expand: "user,project" }); // ✓
 genPM.getFullList({ expand: "user.avatar" }); // ✓ dot-path

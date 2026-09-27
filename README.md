@@ -255,6 +255,9 @@ operators) at compile time — your editor suggests valid fields as you type:
 await postsSvc.getList(1, 20, { sort: '-title' });        // ✓ suggests title/published/…
 await postsSvc.getList(1, 20, { sort: '-nope' });         // ✗ compile error
 await postsSvc.getList(1, 20, { sort: 'title, nope' });   // ✗ every token checked
+// Arrays give full autocomplete (and the same validation):
+await postsSvc.getList(1, 20, { sort: ['-title', 'published'] }); // ✓ suggested
+await postsSvc.getList(1, 20, { expand: ['author', 'owner.name'] });
 
 await postsSvc.getList(1, 20, {
   filter: "title ~ 'x' && published = true", // ✓ every clause field + operator checked
@@ -267,6 +270,15 @@ await postsSvc.getList(1, 20, { filter: 'nope = 1' });    // ✗ compile error
 await postsSvc.getList(1, 20, {
   filter: "title = 'a' && nope = 'y'", // ✗ EVERY clause is validated
 });
+
+// …or build the filter with the typed builder (field names suggested,
+// values escaped for you):
+const q = postsSvc.where;
+await postsSvc.getList(1, 20, {
+  filter: q('title').contains('x').and(q('published').eq(true)),
+  // → filter=(title ~ '%x%' && published = true)
+});
+await postsSvc.getList(1, 20, { filter: q('tags').anyEq('news') }); // ?= operator
 
 await postsSvc.getList(1, 20, { expand: 'author' });      // ✓ field suggested
 await postsSvc.getList(1, 20, { expand: 'author.user' }); // ✓ nested dot-path
@@ -290,10 +302,47 @@ posts[0].expand?.author?.email; // ✓ typed, not unknown
   may contain `&&`/`||` (e.g. `title ~ 'a && b'`). Field names and operators
   are suggested as you type.
 - `sort` — `field`, `-field` (desc), `+field`, or comma-separated. **Every**
-  token is validated.
+  token is validated. Prefer the **array** form (`['-title', 'published']`)
+  when you want editor autocomplete: a comma-separated string is only
+  validated as a whole (template-literal types can't suggest each token).
 - `expand` — comma-separated relation field names, including nested dot-paths
   (`author.user`); **every** token is validated; non-relation fields warn at
-  runtime when a schema is available.
+  runtime when a schema is available. The **array** form
+  (`['author', 'owner.name']`) gives per-token autocomplete.
+
+**Filter builder.** `service.where(field)` starts a type-checked expression.
+The field name is suggested from the collection's key set and the operator is
+a method, so typos are impossible; values are quoted/escaped by the builder
+(no manual interpolation):
+
+```typescript
+const q = postsSvc.where;
+q('title').eq('x');            // title = 'x'
+q('title').contains('x');      // title ~ 'x'
+q('title').notContains('x');   // title !~
+q('published').eq(true);       // published = true
+q('views').gt(100);            // views > 100
+q('created').gte('2024-01-01');// created >= '2024-01-01'
+q('title').eq(null);           // title = null  (IS NULL)
+
+// PocketBase `?` array operators (multi-select / multi-relation):
+q('tags').anyEq('news');       // tags ?= 'news'
+q('tags').anyContains('new');  // tags ?~ 'new'
+
+// Compose — and() / or() / not():
+const filter = q('title').contains('x').and(q('published').eq(true));
+const filter2 = q('a').eq(1).or(q('b').eq(2)).not();
+await postsSvc.getList(1, 20, { filter });
+await postsSvc.getFirstListItem(q('title').eq('x'));
+```
+
+Methods: `eq`, `neq`, `contains`, `notContains`, `gt`, `gte`, `lt`, `lte`,
+the array variants `anyEq`, `anyNeq`, `anyContains`, `anyNotContains`,
+`anyGt`, `anyGte`, `anyLt`, `anyLte`, plus `and`, `or`, `not` and
+`toString()`. Values are checked as filter scalars
+(`string | number | boolean | null`); the server enforces the exact per-field
+type. The raw string form remains fully supported for dynamic/advanced
+expressions.
 
 **Selecting fields of an expanded relation.** PocketBase's `expand` only
 understands relations: `expand=author.name` is silently ignored (and even

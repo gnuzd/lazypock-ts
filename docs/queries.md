@@ -55,6 +55,48 @@ await postsSvc.getOne('abc', { expand: 'author' });
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`) still accepts any
   string — suggestions kick in once the service is typed.
 
+### Autocomplete: use the array forms for `sort` / `expand`
+
+A comma-separated string is validated as a whole (template-literal types can't suggest each token).
+Pass an **array** instead for per-token autocomplete — elements are field-checked exactly the same:
+
+```typescript
+await postsSvc.getList(1, 20, { sort: ['-title', 'published'] }); // editor suggests each
+await postsSvc.getList(1, 20, { expand: ['author', 'owner.name'] });
+
+await postsSvc.getList(1, 20, { sort: ['-nope'] });   // ✗ compile error
+await postsSvc.getList(1, 20, { expand: ['nope'] });  // ✗ compile error
+```
+
+### The typed filter builder
+
+`service.where(field)` starts a type-checked filter expression. The field name is suggested from the
+collection's key set and operators are methods, so typos are impossible; values are quoted/escaped
+for you (no manual interpolation):
+
+```typescript
+const q = postsSvc.where;
+q('title').eq('x');             // title = 'x'
+q('title').contains('x');       // title ~ 'x'
+q('published').eq(true);        // published = true
+q('views').gt(100);             // views > 100
+q('created').gte('2024-01-01'); // created >= '2024-01-01'
+q('title').eq(null);            // title = null  (IS NULL)
+q('tags').anyEq('news');        // tags ?= 'news'   (array operator)
+q('tags').anyContains('new');   // tags ?~ 'new'
+
+// Compose with and() / or() / not():
+const filter = q('title').contains('x').and(q('published').eq(true));
+await postsSvc.getList(1, 20, { filter });
+await postsSvc.getFirstListItem(q('title').eq('x'));
+```
+
+Methods: `eq`, `neq`, `contains`, `notContains`, `gt`, `gte`, `lt`, `lte`, the array variants
+`anyEq`, `anyNeq`, `anyContains`, `anyNotContains`, `anyGt`, `anyGte`, `anyLt`, `anyLte`, plus
+`and`, `or`, `not`, and `toString()`. Values are checked as filter scalars
+(`string | number | boolean | null`) and the server enforces the exact per-field type. The raw
+string form stays fully supported for dynamic/advanced expressions.
+
 ### Selecting fields of an expanded relation
 
 PocketBase's `expand` parameter only understands **relations**:

@@ -1214,6 +1214,85 @@ await (async () => {
 			true,
 		);
 	}
+
+	// 14. array shorthands for sort / expand join to the comma form
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, sort: ["-title", "published"] });
+		check(
+			"sort array joins to sort=-title,published",
+			lastUrl().includes("sort=-title%2Cpublished"),
+			true,
+		);
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: ["author"] });
+		check(
+			"expand array joins + keeps expand.author",
+			lastUrl().includes("expand=author") && lastUrl().includes("expand.author"),
+			true,
+		);
+		await c
+			.collection("posts")
+			.getList(1, 20, {
+				fetch: fetchMock,
+				expand: ["author.name", "author.email"],
+			});
+		check(
+			"expand array field selection rewrites to expand=author + fields",
+			lastUrl().includes("expand=author") &&
+				lastUrl().includes("expand.author.name"),
+			true,
+		);
+	}
+
+	// 15. typed filter builder — field/operator methods, safe escaping
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		const svc = c.collection("posts");
+		const q = svc.where;
+
+		check("where eq builds field = value", q("title").eq("x").toString(), "title = 'x'");
+		check(
+			"where escapes single quotes",
+			q("title").contains("it's").toString(),
+			"title ~ 'it\\'s'",
+		);
+		check(
+			"where and() wraps and joins with &&",
+			q("title").eq("a").and(q("published").eq(true)).toString(),
+			"(title = 'a' && published = true)",
+		);
+		check(
+			"where or()/not()",
+			q("title").eq("a").or(q("title").eq("b")).not().toString(),
+			"!((title = 'a' || title = 'b'))",
+		);
+		check(
+			"where anyContains() uses the ?~ operator",
+			q("title").anyContains("news").toString(),
+			"title ?~ 'news'",
+		);
+		check("where eq(null) emits null", q("title").eq(null).toString(), "title = null");
+
+		await svc.getList(1, 20, {
+			fetch: fetchMock,
+			filter: q("title").eq("a").and(q("published").eq(true)),
+		});
+		check(
+			"filter accepts a FilterExpr",
+			lastUrl().includes("filter=") && lastUrl().includes("published"),
+			true,
+		);
+	}
 })();
 
 console.log(

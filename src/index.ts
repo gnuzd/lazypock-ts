@@ -28,6 +28,8 @@ export {
 	schemaFieldType,
 } from "./lazypock";
 export { TypedClient, createClient } from "./client";
+export { FilterExpr, FilterBuilder } from "./filter";
+export type { FilterScalar } from "./filter";
 
 export type {
 	// types
