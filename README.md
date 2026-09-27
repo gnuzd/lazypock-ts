@@ -271,6 +271,7 @@ await postsSvc.getList(1, 20, {
 await postsSvc.getList(1, 20, { expand: 'author' });      // ✓ field suggested
 await postsSvc.getList(1, 20, { expand: 'author.user' }); // ✓ nested dot-path
 await postsSvc.getList(1, 20, { expand: 'author, nope' }); // ✗ every token checked
+await postsSvc.getList(1, 20, { expand: 'author.name,author.email' }); // ✓ expand + select fields
 await postsSvc.getOne('abc', { expand: 'author' });
 
 // Expanded records carry an `expand` property keyed by the requested fields,
@@ -293,6 +294,30 @@ posts[0].expand?.author?.email; // ✓ typed, not unknown
 - `expand` — comma-separated relation field names, including nested dot-paths
   (`author.user`); **every** token is validated; non-relation fields warn at
   runtime when a schema is available.
+
+**Selecting fields of an expanded relation.** PocketBase's `expand` only
+understands relations: `expand=author.name` is silently ignored (and even
+cancels the `author` expansion) because `name` is not a relation. Lazypock
+detects a dotted tail that is not a relation and rewrites the query to the
+correct PocketBase form, so the shorthand just works:
+
+```typescript
+await postsSvc.getFullList({ expand: 'author.name,author.email' });
+// → GET /api/posts?expand=author&fields=*,expand.author.name,expand.author.email
+// posts[0].expand.author === { name: '…', email: '…' }
+```
+
+A dotted path whose segments are all **relations** keeps its nested-expand
+meaning (`expand: 'author.user'` expands the `user` relation on the author).
+Disambiguation needs the target collection's schema — the codegen
+`createClient()` wires it in automatically. Without one, two or more dotted
+tokens under the same relation (e.g. `author.name,author.email`) are treated
+as a field selection, while a lone dotted token stays a nested relation and
+logs a warning.
+
+A field projection (`select(...)`, the schema default, or an explicit
+`fields`) is preserved: the expand entries are merged in so the expanded data
+is never silently dropped by the server's strict `fields` filter.
 
 **Expanded records are typed.** When a list/read is called with `expand`,
 the returned records include an optional `expand` object whose keys are the

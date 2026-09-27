@@ -6,6 +6,16 @@
 
 * **auth:** add OAuth2 sign-in — `authWithOAuth2` (popup flow), `authWithOAuth2Code` (direct code exchange), and typed `listAuthMethods`
 
+### Bug Fixes
+
+* **expand:** keep expanded records when a `fields` projection is active (schema
+  default, `select(...)`, or explicit `fields`) — the strict `fields` param no
+  longer silently drops `expand`
+* **expand:** support field selection via dotted tokens
+  (`expand: "owner.name,owner.email"` is rewritten to
+  `expand=owner&fields=…,expand.owner.name,expand.owner.email`); dotted paths
+  that are all relations keep their nested-expand meaning
+
 ## [0.13.0](https://github.com/gnuzd/lazypock-ts/compare/v0.12.0...v0.13.0) (2026-09-23)
 
 

@@ -17,7 +17,7 @@ import {
 	type ExpandObj,
 } from "./types";
 import type { RealtimeService } from "./realtime";
-import type { CollectionSchema } from "./schema";
+import type { CollectionSchema, SchemaField } from "./schema";
 import {
 	authorizeWithOAuth2Popup,
 	oauth2RedirectOrigin,
@@ -128,6 +128,26 @@ function normalizeAction(
 }
 
 /**
+ * Resolves a collection schema by name or id. Supplied by
+ * {@link LazypockClient} so a service can follow relation fields into their
+ * target collection — needed to tell a nested relation (`owner.manager`)
+ * apart from a field selection (`owner.name`).
+ */
+export type SchemaResolver = (
+	nameOrId: string,
+) => CollectionSchema | undefined;
+
+/** Normalised form of a caller's `expand` string. */
+interface NormalizedExpand {
+	/** Rewritten `expand` query param (relation paths only). */
+	expand?: string;
+	/** `fields` entries that keep/narrow the expanded data. */
+	fieldSelectors: string[];
+	/** True when a token selects specific fields (needs a `fields` param). */
+	narrows: boolean;
+}
+
+/**
  * Typed CRUD service for a single dynamic collection.
  * Get an instance via {@link LazypockClient.collection}.
  *
@@ -155,6 +175,8 @@ export class CollectionService<
 	private realtime?: RealtimeService;
 	/** Optional schema for this collection (from client `types.schemas`). */
 	private schema?: CollectionSchema;
+	/** Resolves relation targets across collections (client-level schemas). */
+	private schemaResolver?: SchemaResolver;
 	/**
 	 * Active field projection from {@link select}. `"*"` (or unset) means
 	 * "all visible (non-hidden) fields plus the implicit system keys" —
@@ -170,12 +192,14 @@ export class CollectionService<
 		authStore?: AuthStore,
 		realtime?: RealtimeService,
 		schema?: CollectionSchema,
+		schemaResolver?: SchemaResolver,
 	) {
 		this.http = http;
 		this.collectionName = collectionName;
 		this.authStore = authStore;
 		this.realtime = realtime;
 		this.schema = schema;
+		this.schemaResolver = schemaResolver;
 	}
 
 	private encodeId(id: string): string {
@@ -216,6 +240,7 @@ export class CollectionService<
 			this.authStore,
 			this.realtime,
 			this.schema,
+			this.schemaResolver,
 		);
 		derived.fieldsPreset = preset;
 		if (this.schema && preset !== "*") {
@@ -287,22 +312,237 @@ export class CollectionService<
 		].join(",");
 	}
 
+	/**
+	 * Resolve the leading relation chain of an expand token against the
+	 * (optionally schema-aware) collection graph.
+	 *
+	 * Walks `segments` from this collection: each segment that is a relation
+	 * advances to its target collection. Stops at the first non-relation
+	 * segment or when the target schema is unknown.
+	 *
+	 * @returns `depth` — how many leading segments are relations; and
+	 * `canInspect` — whether the schema at `depth` is known (so the next
+	 * segment can be classified as a field selection vs a nested relation).
+	 */
+	private resolveRelationChain(segments: string[]): {
+		depth: number;
+		canInspect: boolean;
+	} {
+		let currentFields = this.schema?.fields;
+		if (!currentFields) return { depth: 0, canInspect: false };
+		for (let i = 0; i < segments.length; i++) {
+			const field = currentFields.find((f) => f.name === segments[i]);
+			if (!field || field.type !== "relation") {
+				return { depth: i, canInspect: true };
+			}
+			if (i === segments.length - 1) {
+				return { depth: segments.length, canInspect: true };
+			}
+			const target = this.resolveTargetCollection(field);
+			if (!target?.fields) {
+				return { depth: i + 1, canInspect: false };
+			}
+			currentFields = target.fields;
+		}
+		return { depth: segments.length, canInspect: true };
+	}
+
+	/** Follow a relation field to its target collection, if resolvable. */
+	private resolveTargetCollection(
+		field: SchemaField,
+	): CollectionSchema | undefined {
+		const key =
+			field.options?.collection ??
+			field.options?.collectionId ??
+			field.collectionId ??
+			undefined;
+		if (!key || !this.schemaResolver) return undefined;
+		return this.schemaResolver(String(key));
+	}
+
 	/** Warn once when an expand field is not a relation (schema known). */
-	private validateExpand(expand: string | undefined): void {
-		if (!expand || !this.schema?.fields) return;
-		const relations = new Set(
-			this.schema.fields
-				.filter((f) => f.type === "relation")
-				.map((f) => f.name),
+	private warnNonRelation(name: string): void {
+		console.warn(
+			`[lazypock] expand("${name}"): field is not a relation on collection "${this.collectionName}"`,
 		);
-		for (const f of expand.split(",")) {
-			const name = f.trim();
-			if (name && !relations.has(name)) {
-				console.warn(
-					`[lazypock] expand("${name}"): field is not a relation on collection "${this.collectionName}"`,
-				);
+	}
+
+	/**
+	 * Validate and normalise a caller's `expand` string.
+	 *
+	 * PocketBase only expands *relations*: a dotted token like `author.user`
+	 * walks into the related record. Callers often use a dotted token to mean
+	 * "only these fields of the expanded record" (`owner.name,owner.email`),
+	 * which PocketBase silently drops. When the trailing segment is not a
+	 * relation — resolved from the schema graph — the token is rewritten as a
+	 * field selection:
+	 *
+	 * ```
+	 * expand: 'owner.name,owner.email'
+	 * → expand=owner&fields=<base>,expand.owner.name,expand.owner.email
+	 * ```
+	 *
+	 * Tokens whose whole path is relations keep their existing nested-expand
+	 * behaviour. Without a schema the two are indistinguishable, so a lone
+	 * dotted token stays a nested expand (with a warning) while two or more
+	 * dotted tokens sharing the same relation are treated as field selection.
+	 */
+	private normalizeExpand(expand: string | undefined): NormalizedExpand {
+		if (!expand) return { fieldSelectors: [], narrows: false };
+		const tokens = expand
+			.split(",")
+			.map((t) => t.trim())
+			.filter(Boolean);
+		if (tokens.length === 0) return { fieldSelectors: [], narrows: false };
+
+		const relations = this.schema?.fields
+			? new Set(
+					this.schema.fields
+						.filter((f) => f.type === "relation")
+						.map((f) => f.name),
+				)
+			: undefined;
+
+		interface ParsedToken {
+			token: string;
+			base: string;
+			segments: string[];
+			kind: "plain" | "nested" | "narrow" | "unknown";
+			/** For `narrow`: number of leading relation segments. */
+			depth: number;
+		}
+
+		const parsed: ParsedToken[] = [];
+		for (const token of tokens) {
+			const segments = token.split(".").filter(Boolean);
+			const base = segments[0] ?? token;
+			if (segments.length <= 1) {
+				if (relations && !relations.has(base)) {
+					this.warnNonRelation(base);
+				}
+				parsed.push({ token, base, segments, kind: "plain", depth: 0 });
+				continue;
+			}
+			if (!relations) {
+				// No schema at all — deferred to the grouping pass below.
+				parsed.push({ token, base, segments, kind: "unknown", depth: 1 });
+				continue;
+			}
+			const { depth, canInspect } = this.resolveRelationChain(segments);
+			if (depth === 0) {
+				this.warnNonRelation(base);
+				parsed.push({ token, base, segments, kind: "plain", depth: 0 });
+			} else if (depth === segments.length) {
+				parsed.push({ token, base, segments, kind: "nested", depth });
+			} else if (canInspect) {
+				parsed.push({ token, base, segments, kind: "narrow", depth });
+			} else {
+				parsed.push({ token, base, segments, kind: "unknown", depth });
 			}
 		}
+
+		// Disambiguate unknown tokens per relation: two+ distinct sub-paths is
+		// clearly a field selection; a lone dotted token keeps nested-expand.
+		const byBase = new Map<string, ParsedToken[]>();
+		for (const t of parsed) {
+			const arr = byBase.get(t.base);
+			if (arr) arr.push(t);
+			else byBase.set(t.base, [t]);
+		}
+		for (const [base, group] of byBase) {
+			const unknowns = group.filter((t) => t.kind === "unknown");
+			if (unknowns.length === 0) continue;
+			const distinct = new Set(unknowns.map((t) => t.token));
+			const hasNarrow = group.some((t) => t.kind === "narrow");
+			if (!hasNarrow && distinct.size < 2) {
+				for (const t of unknowns) {
+					t.kind = "nested";
+					console.warn(
+						`[lazypock] expand("${t.token}"): treated as a nested relation. ` +
+							`Pass types.schemas (or use fields=) to select fields of "${base}".`,
+					);
+				}
+			} else {
+				for (const t of unknowns) t.kind = "narrow";
+			}
+		}
+
+		const expandParams: string[] = [];
+		const expandSeen = new Set<string>();
+		const fieldSelectors: string[] = [];
+		const selectorSeen = new Set<string>();
+		let narrows = false;
+		const pushParam = (p: string) => {
+			if (!expandSeen.has(p)) {
+				expandSeen.add(p);
+				expandParams.push(p);
+			}
+		};
+		const pushSelector = (s: string) => {
+			if (!selectorSeen.has(s)) {
+				selectorSeen.add(s);
+				fieldSelectors.push(s);
+			}
+		};
+
+		for (const t of parsed) {
+			if (t.kind === "plain") {
+				pushParam(t.token);
+				pushSelector(`expand.${t.token}`);
+			} else if (t.kind === "nested") {
+				pushParam(t.token);
+				pushSelector(`expand.${t.segments[0]}`);
+			} else {
+				narrows = true;
+				const depth = Math.max(1, t.depth);
+				const relationPath = t.segments.slice(0, depth).join(".");
+				pushParam(relationPath);
+				pushSelector(`expand.${t.segments.slice(0, depth + 1).join(".")}`);
+			}
+		}
+
+		return {
+			expand: expandParams.length > 0 ? expandParams.join(",") : undefined,
+			fieldSelectors,
+			narrows,
+		};
+	}
+
+	/**
+	 * Merge the expand-preserving selectors into the base field projection.
+	 *
+	 * PocketBase's `fields` param is strict: without an `expand.*` entry the
+	 * whole `expand` payload is dropped. When no projection is active and the
+	 * caller only asked for (full) relations, no `fields` param is sent at
+	 * all — the server keeps `expand` on its own.
+	 */
+	private mergeExpandFields(
+		base: string | undefined,
+		info: NormalizedExpand,
+	): string | undefined {
+		if (info.fieldSelectors.length === 0) return base;
+		if (base === undefined && !info.narrows) return undefined;
+
+		const parts = (base ?? "*")
+			.split(",")
+			.map((f) => f.trim())
+			.filter(Boolean);
+		const seen = new Set(parts);
+		// A full `expand.<key>` selector already includes any narrower
+		// `expand.<key>.<field>` selection — drop the redundant narrow ones.
+		const fullKeys = new Set<string>();
+		for (const selector of info.fieldSelectors) {
+			const seg = selector.split(".");
+			if (seg.length === 2) fullKeys.add(seg[1]);
+		}
+		for (const selector of info.fieldSelectors) {
+			const seg = selector.split(".");
+			if (seg.length > 2 && fullKeys.has(seg[1])) continue;
+			if (seen.has(selector)) continue;
+			seen.add(selector);
+			parts.push(selector);
+		}
+		return parts.join(",");
 	}
 
 	/**
@@ -333,14 +573,23 @@ export class CollectionService<
 			params,
 			...queryParams
 		} = options ?? {};
-		// Resolve the effective `fields` projection (select() preset or schema
-		// default) unless the caller passed an explicit `fields`.
-		const fields = this.effectiveFields(queryParams.fields as string | undefined);
-		if (fields !== undefined && queryParams.fields === undefined) {
-			queryParams.fields = fields;
+		// Normalise `expand`: dotted tokens that select fields of a relation are
+		// rewritten to PocketBase's `expand` + `fields=expand.<rel>.<field>`
+		// form (raw `expand=owner.name` is silently ignored by the server).
+		const expandInfo = this.normalizeExpand(
+			typeof queryParams.expand === "string" ? queryParams.expand : undefined,
+		);
+		if (expandInfo.expand !== undefined) {
+			(queryParams as Record<string, unknown>).expand = expandInfo.expand;
 		}
-		if (typeof queryParams.expand === "string") {
-			this.validateExpand(queryParams.expand);
+		// Resolve the effective `fields` projection (select() preset or schema
+		// default) and keep the expanded data alive under strict projection.
+		const fields = this.mergeExpandFields(
+			this.effectiveFields(queryParams.fields as string | undefined),
+			expandInfo,
+		);
+		if (fields !== undefined) {
+			queryParams.fields = fields;
 		}
 		const qs = new URLSearchParams(
 			Object.fromEntries(
@@ -443,13 +692,18 @@ export class CollectionService<
 		id: string,
 		options?: ReadOptions<TFields, E> & RequestOptions,
 	): Promise<(T & { expand?: ExpandObj<E, TExpand> }) | null> {
-		const fields = this.effectiveFields(options?.fields);
-		if (typeof options?.expand === "string") {
-			this.validateExpand(options.expand);
-		}
+		const expandInfo = this.normalizeExpand(
+			typeof options?.expand === "string" ? options.expand : undefined,
+		);
+		const fields = this.mergeExpandFields(
+			this.effectiveFields(options?.fields),
+			expandInfo,
+		);
 		const qs = new URLSearchParams();
 		if (fields !== undefined) qs.set("fields", fields);
-		if (typeof options?.expand === "string") qs.set("expand", options.expand);
+		if (typeof options?.expand === "string") {
+			qs.set("expand", expandInfo.expand ?? options.expand);
+		}
 		const qsStr = qs.toString();
 		return this.http.get<T & { expand?: ExpandObj<E, TExpand> }>(
 			"/" +
@@ -576,6 +830,7 @@ export class CollectionService<
 			this.authStore,
 			this.realtime,
 			schema,
+			this.schemaResolver,
 		);
 		derived.fieldsPreset = this.fieldsPreset;
 		return derived;

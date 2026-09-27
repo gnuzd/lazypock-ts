@@ -42,6 +42,7 @@ await postsSvc.getList(1, 20, {
 await postsSvc.getList(1, 20, { filter: 'nope = 1' }); // ✗ compile error
 
 await postsSvc.getList(1, 20, { expand: 'author' }); // ✓ field suggested
+await postsSvc.getList(1, 20, { expand: 'author.name,author.email' }); // ✓ expand + select fields
 await postsSvc.getOne('abc', { expand: 'author' });
 ```
 
@@ -53,6 +54,31 @@ await postsSvc.getOne('abc', { expand: 'author' });
   is available.
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`) still accepts any
   string — suggestions kick in once the service is typed.
+
+### Selecting fields of an expanded relation
+
+PocketBase's `expand` parameter only understands **relations**:
+`expand=author.name` is silently ignored (and cancels the `author` expansion)
+because `name` is not a relation. Lazypock detects a dotted tail that is not a
+relation and rewrites the query to the correct PocketBase form, so the
+shorthand works:
+
+```typescript
+await postsSvc.getFullList({ expand: 'author.name,author.email' });
+// → GET /api/posts?expand=author&fields=*,expand.author.name,expand.author.email
+// posts[0].expand.author === { name: '…', email: '…' }
+```
+
+A dotted path whose segments are all **relations** keeps its nested-expand
+meaning (`expand: 'author.user'` expands the `user` relation on the author).
+Disambiguation needs the target collection's schema — the codegen
+`createClient()` wires it in automatically. Without a schema, two or more
+dotted tokens under the same relation are treated as a field selection, while
+a lone dotted token stays a nested relation and logs a warning.
+
+An active projection (`select(...)`, the schema default, or an explicit
+`fields`) is preserved — the expand entries are merged in, so expanded data is
+never silently dropped by the server's strict `fields` filter.
 
 ### The `?` operators — any/at-least-one-of
 

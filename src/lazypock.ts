@@ -159,6 +159,7 @@ export class LazypockClient {
 	readonly files: FilesService;
 	private collectionCache = new Map<string, CollectionService>();
 	private schemaByName?: Map<string, CollectionSchema>;
+	private schemaById?: Map<string, CollectionSchema>;
 
 	/**
 	 * Create a new Lazypock client.
@@ -199,6 +200,12 @@ export class LazypockClient {
 			this.schemaByName = new Map(
 				options.types.schemas.map((s) => [s.name, s]),
 			);
+			// Also index by id so relation fields that only carry
+			// `collectionId` (PocketBase >= 0.23) still resolve their target.
+			this.schemaById = new Map();
+			for (const s of options.types.schemas) {
+				if (s.id) this.schemaById.set(String(s.id), s);
+			}
 		}
 	}
 
@@ -223,6 +230,9 @@ export class LazypockClient {
 				this.realtime,
 				// Prefer the explicit schema, then the client-level `types.schemas`.
 				schema ?? this.schemaByName?.get(name),
+				// Let the service follow relation fields into other collections
+				// (expand field selection vs nested-relation expansion).
+				(key) => this.schemaByName?.get(key) ?? this.schemaById?.get(key),
 			);
 			this.collectionCache.set(name, svc);
 		}

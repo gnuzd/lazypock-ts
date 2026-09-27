@@ -1106,6 +1106,114 @@ await (async () => {
 			true,
 		);
 	}
+
+	// users schema so relation targets can be resolved across collections
+	const usersSchema = {
+		name: "users",
+		type: "auth",
+		fields: [
+			{ name: "name", type: "text" },
+			{ name: "email", type: "email" },
+			{ name: "manager", type: "relation", options: { collection: "users" } },
+		],
+	};
+
+	// 9. expand field selection — a dotted tail that is not a relation is
+	// rewritten to PocketBase's `expand` + `fields=expand.<rel>.<field>` form
+	// (raw `expand=owner.name` is silently dropped by the server).
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "author.name,author.email" });
+		check(
+			"expand('author.name,author.email') → expand=author (dotted tails dropped)",
+			lastUrl().includes("expand=author") && !lastUrl().includes("expand=author.name"),
+			true,
+		);
+		check(
+			"expand field selection → fields carries expand.author.{name,email}",
+			lastUrl().includes("expand.author.name") &&
+				lastUrl().includes("expand.author.email"),
+			true,
+		);
+	}
+
+	// 10. a dotted tail that IS a relation keeps nested-expand behaviour
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "author.manager" });
+		check(
+			"expand('author.manager') stays a nested relation",
+			lastUrl().includes("expand=author.manager"),
+			true,
+		);
+		check(
+			"nested expand adds expand.author to fields (not the leaf path)",
+			lastUrl().includes("expand.author") &&
+				!lastUrl().includes("expand.author.manager"),
+			true,
+		);
+	}
+
+	// 11. plain expand survives the schema-default field projection
+	{
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema] },
+		});
+		await c.collection("posts").getList(1, 20, { fetch: fetchMock, expand: "author" });
+		check(
+			"plain expand + schema projection keeps expand.author in fields",
+			lastUrl().includes("expand.author") && lastUrl().includes("expand=author"),
+			true,
+		);
+	}
+
+	// 12. no schema: two+ dotted tokens under one relation → field selection
+	{
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "author.name,author.email" });
+		check(
+			"no-schema expand('author.name,author.email') → expand=author + fields=*,expand.author.*",
+			lastUrl().includes("expand=author") &&
+				lastUrl().includes("fields=*") &&
+				lastUrl().includes("expand.author.name"),
+			true,
+		);
+	}
+
+	// 13. no schema: a lone dotted token stays a nested relation (with a warning)
+	{
+		const warns = [];
+		const origWarn = console.warn;
+		console.warn = (...a) => warns.push(a.join(" "));
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await c
+			.collection("posts")
+			.getList(1, 20, { fetch: fetchMock, expand: "author.manager" });
+		console.warn = origWarn;
+		check(
+			"no-schema single dotted token → expand=author.manager (nested)",
+			lastUrl().includes("expand=author.manager"),
+			true,
+		);
+		check(
+			"no-schema single dotted token warns about ambiguity",
+			warns.some((w) => w.includes("treated as a nested relation")),
+			true,
+		);
+	}
 })();
 
 console.log(

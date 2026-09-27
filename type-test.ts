@@ -139,6 +139,9 @@ await postsSvc.getList(1, 20, { expand: "author" });
 await postsSvc.getOne("abc", { expand: "author", fields: "id,title" });
 // Nested dot-paths (`author.user`) are accepted for multi-level relations.
 await postsSvc.getList(1, 20, { expand: "author.user" });
+// Field selection on an expanded relation is also accepted; the runtime
+// rewrites it to PocketBase's `expand` + `fields=expand.<rel>.<field>` form.
+await postsSvc.getList(1, 20, { expand: "author.name,author.email" });
 // @ts-expect-error expand rejects unknown fields
 await postsSvc.getList(1, 20, { expand: "nope" });
 
