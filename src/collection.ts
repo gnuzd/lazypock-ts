@@ -14,6 +14,7 @@ import {
 	type ReadOptions,
 	type FilterString,
 	type FieldKey,
+	type FilterableKey,
 	type ExpandObj,
 } from "./types";
 import type { RealtimeService } from "./realtime";
@@ -332,9 +333,11 @@ export class CollectionService<
 	 * ```
 	 *
 	 * Chain `.and()` / `.or()` / `.not()` to compose. A `FilterExpr` can be
-	 * passed anywhere a `filter` string is accepted.
+	 * passed anywhere a `filter` string is accepted. Relation dot-paths
+	 * (`where("author.email")`) are supported, and `where("id").in(ids)`
+	 * covers list membership without hand-written OR chains.
 	 */
-	where<F extends FieldKey<TFields>>(field: F): FilterBuilder<F> {
+	where<F extends FilterableKey<TFields>>(field: F): FilterBuilder<F> {
 		return new FilterBuilder<F>(field);
 	}
 

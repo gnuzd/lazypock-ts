@@ -165,6 +165,15 @@ export type FieldKey<T> = Extract<keyof T, string> extends never
 	: Extract<keyof T, string>;
 
 /**
+ * A filterable key: a top-level field, or a relation dot-path
+ * (`"author.email"`). Used by the filter builder so nested relation fields
+ * can be compared without dropping to the raw string form.
+ */
+export type FilterableKey<T> =
+	| FieldKey<T>
+	| `${FieldKey<T>}.${string}`;
+
+/**
  * Valid filter operators, matching the backend FilterCompiler.
  *
  * The `?`-prefixed operators are PocketBase's "any/at least one of"
