@@ -272,7 +272,7 @@ await postsSvc.getFullList({
 | Both conditions (AND) | `q('published').eq(true).and(q('views').gt(100))` |
 | Either condition (OR) | `q('a').eq(1).or(q('b').eq(2))` |
 | Negate a condition | `q('archived').eq(true).not()` |
-| Filter on a related field | `q('author.email').eq('ada@example.com')` |
+| Filter by relation id | `q('author').eq(userId)` |
 | Expand a relation | `getList(1, 20, { expand: ['author'] })` |
 | Only some expanded fields | `getList(1, 20, { expand: ['author.name'] })` |
 | Return only some fields | `client.collection('posts').select('id', 'title').getList()` |
@@ -296,9 +296,13 @@ a compile error:
 ```typescript
 await postsSvc.getList(1, 20, { filter: "title ~ 'hello' && published = true" });
 await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" });
-await postsSvc.getList(1, 20, { filter: "author.email = 'x'" }); // relation dot-path
 await postsSvc.getList(1, 20, { filter: "tags ?= 'news'" });     // any array element
 ```
+
+> **Filter fields are top-level.** To filter by a relation, compare it with
+> the related record's id (`author = 'USER_ID'`). Relation dot-paths
+> (`author.email = 'x'`) are PocketBase syntax but the LazyPock filter engine
+> does not compile them (HTTP `400`).
 
 | Operator | Meaning |
 | --- | --- |
@@ -322,8 +326,8 @@ q('views').gte(100);            // views >= 100
 q('title').eq(null);            // title = null  (is empty)
 q('id').in(['a', 'b', 'c']);    // (id = 'a' || id = 'b' || id = 'c')  — list membership
 q('id').notIn(['a', 'b']);      // (id != 'a' && id != 'b')
-q('author.email').eq('x');      // relation dot-path
 q('tags').anyEq('news');        // any array element equals
+q('author').eq(userId);         // filter by relation id
 
 // combine — and() / or() / not()
 q('title').contains('x').and(q('published').eq(true)); // (… && …)
@@ -358,17 +362,17 @@ await postsSvc.getFullList({ expand: ['author.name', 'author.email'] }); // only
 ```
 
 - `record.expand.author` is the related record; `record.author` is the id.
-- Field selection (`author.name`) is rewritten to PocketBase's
-  `expand=author&fields=…,expand.author.name` — the server ignores
-  `expand=author.name` on its own.
+- Field selection (`author.name`) is applied for you — PocketBase narrows it
+  server-side, the LazyPock server returns the full related record and the SDK
+  keeps only the requested fields.
 - Distinguishing a field (`author.name`) from a nested relation
   (`author.profile`) needs the target schema. Codegen's `createClient()` wires
   it in automatically; with a hand-written client, pass `types.schemas`.
 - On a typed service, `record.expand.author` is typed as the target record
   (`record.expand.user` is `UsersRecord`, not `unknown`); multi-relations
   (`maxSelect > 1`) become arrays.
-- If a `select()` / `fields` projection is active, the `expand.*` entries are
-  merged in, so the expanded data is never dropped.
+- The relation field + `expand.*` entries are merged into any active
+  `select()` / `fields` projection, so the expanded data is never dropped.
 
 **Hidden fields are queryable.** A hidden relation is excluded from the read
 model but the server still resolves it for `filter` / `sort` / `expand` /

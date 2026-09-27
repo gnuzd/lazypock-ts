@@ -84,7 +84,7 @@ q('title').contains('x');                    // title ~ 'x'
 q('views').gte(100);                         // views >= 100
 q('id').in(['a', 'b', 'c']);                 // (id = 'a' || id = 'b' || id = 'c')
 q('id').notIn(['a', 'b']);                   // (id != 'a' && id != 'b')
-q('author.email').eq('ada@example.com');     // relation dot-path
+q('author').eq(userId);                      // filter by relation id
 q('title').eq('x').and(q('published').eq(true));
 q('a').eq(1).or(q('b').eq(2)).not();
 ```

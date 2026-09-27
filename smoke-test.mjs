@@ -1152,8 +1152,8 @@ await (async () => {
 			.collection("posts")
 			.getList(1, 20, { fetch: fetchMock, expand: "author.manager" });
 		check(
-			"expand('author.manager') stays a nested relation",
-			lastUrl().includes("expand=author.manager"),
+			"expand('author.manager') keeps every relation prefix (author first)",
+			lastUrl().includes("expand=author%2Cauthor.manager"),
 			true,
 		);
 		check(
@@ -1185,10 +1185,8 @@ await (async () => {
 			.collection("posts")
 			.getList(1, 20, { fetch: fetchMock, expand: "author.name,author.email" });
 		check(
-			"no-schema expand('author.name,author.email') → expand=author + fields=*,expand.author.*",
-			lastUrl().includes("expand=author") &&
-				lastUrl().includes("fields=*") &&
-				lastUrl().includes("expand.author.name"),
+			"no-schema expand('author.name,author.email') → expand=author, no fields param",
+			lastUrl().includes("expand=author") && !lastUrl().includes("fields="),
 			true,
 		);
 	}
@@ -1204,8 +1202,8 @@ await (async () => {
 			.getList(1, 20, { fetch: fetchMock, expand: "author.manager" });
 		console.warn = origWarn;
 		check(
-			"no-schema single dotted token → expand=author.manager (nested)",
-			lastUrl().includes("expand=author.manager"),
+			"no-schema single dotted token → expand=author,author.manager (nested)",
+			lastUrl().includes("expand=author%2Cauthor.manager"),
 			true,
 		);
 		check(
@@ -1317,6 +1315,74 @@ await (async () => {
 		check(
 			"filter accepts a FilterExpr",
 			lastUrl().includes("filter=") && lastUrl().includes("published"),
+			true,
+		);
+	}
+
+	// 16. client-side field selection on expanded records (servers that always
+	// return the full related record, e.g. the LazyPock server)
+	{
+		const expandedItems = {
+			items: [
+				{
+					id: "1",
+					author: "u1",
+					expand: {
+						author: {
+							id: "u1",
+							name: "Ada",
+							email: "ada@x.com",
+							avatar: "a.png",
+							created: "c",
+							updated: "u",
+						},
+					},
+				},
+			],
+			page: 1,
+			perPage: 30,
+			totalItems: 1,
+			totalPages: 1,
+		};
+		const expandedFetch = async () => ({
+			ok: true,
+			status: 200,
+			text: async () => JSON.stringify(expandedItems),
+		});
+		const oneFetch = async () => ({
+			ok: true,
+			status: 200,
+			text: async () => JSON.stringify(expandedItems.items[0]),
+		});
+		const c = new LazypockClient({
+			baseUrl: "http://x/api",
+			types: { schemas: [postsSchema, usersSchema] },
+		});
+		const list = await c
+			.collection("posts")
+			.getList(1, 20, { fetch: expandedFetch, expand: "author.name,author.email" });
+		const rec = list.items[0];
+		check(
+			"client-side expand narrowing keeps only requested fields",
+			JSON.stringify(Object.keys(rec.expand.author).sort()),
+			JSON.stringify(["email", "name"]),
+		);
+		const one = await c
+			.collection("posts")
+			.getOne("1", { fetch: oneFetch, expand: ["author.name"] });
+		check(
+			"client-side expand narrowing applies to getOne too",
+			JSON.stringify(Object.keys(one.expand.author)),
+			JSON.stringify(["name"]),
+		);
+		// A full (non-dotted) expand is left untouched.
+		const fullList = await c
+			.collection("posts")
+			.getList(1, 20, { fetch: expandedFetch, expand: "author" });
+		const full = fullList.items[0];
+		check(
+			"plain expand is not narrowed client-side",
+			"email" in full.expand.author && "avatar" in full.expand.author,
 			true,
 		);
 	}

@@ -27,7 +27,6 @@ const q = postsSvc.where;
 | Filter by a list of ids | `getFullList({ filter: q('id').in(ids) })` |
 | Search a text field | `getList(1, 20, { filter: q('title').contains(term) })` |
 | Filter by relation id | `getFullList({ filter: q('author').eq(userId) })` |
-| Filter by a field on the related record | `getFullList({ filter: q('author.email').eq(email) })` |
 | Combine conditions (AND) | `q('published').eq(true).and(q('views').gt(100))` |
 | Either of two conditions (OR) | `q('a').eq(1).or(q('b').eq(2))` |
 | Negate a condition | `q('archived').eq(true).not()` |
@@ -73,8 +72,7 @@ await postsSvc.getList(1, 20, { sort: ['-nope'] }); // ✗ compile error
 There are two ways to build a filter:
 
 1. **Filter expression string** — full PocketBase syntax, validated at compile
-   time on typed services. Best for dot-paths, dynamic strings, and advanced
-   expressions.
+   time on typed services. Best for dynamic strings and advanced expressions.
 2. **Typed builder** (`service.where(field)`) — field names are suggested,
    operators are methods, and values are escaped automatically. Best for
    hand-written queries.
@@ -92,8 +90,13 @@ await postsSvc.getList(1, 20, { filter: "published = true" });
 await postsSvc.getList(1, 20, { filter: "views >= 100" });
 await postsSvc.getList(1, 20, { filter: "title ~ 'a' && published = true" });
 await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" });
-await postsSvc.getList(1, 20, { filter: "author.email = 'ada@example.com'" }); // relation dot-path
 ```
+
+> **Filter fields are top-level collection fields.** To filter by a relation,
+> compare the relation field with the related record's id
+> (`author = 'USER_ID'`). Relation *dot-paths* (`author.email = 'x'`) are part
+> of PocketBase's syntax but the LazyPock filter engine does not compile them
+> (it returns `400 Invalid filter expression`), so avoid them.
 
 #### Operators
 
@@ -184,15 +187,6 @@ await postsSvc.getList(1, 20, {
 // → !((status = 'open' || status = 'pending'))
 ```
 
-#### Relation dot-paths
-
-`where` accepts a relation dot-path (`author.email`) — the first segment must
-be a field on the collection:
-
-```typescript
-await postsSvc.getList(1, 20, { filter: q('author.email').eq('ada@example.com') });
-```
-
 #### Values and escaping
 
 Values may be `string`, `number`, `boolean`, or `null`. Strings are
@@ -213,7 +207,7 @@ you can still use the raw string for advanced cases:
 
 ```typescript
 await postsSvc.getFirstListItem(q('slug').eq('hello-world'));
-await postsSvc.getList(1, 20, { filter: "author.email ~ '.com' && published = true" });
+await postsSvc.getList(1, 20, { filter: "title ~ 'x' && published = true" });
 ```
 
 ---
@@ -246,20 +240,24 @@ await postsSvc.getFullList({ expand: ['author.profile'] });
 
 ### Only some fields of the expanded record
 
-Add the field after the relation:
+Add the field(s) after the relation:
 
 ```typescript
 await postsSvc.getFullList({ expand: ['author.name', 'author.email'] });
 // post.expand.author === { name: '…', email: '…' }  (no other fields)
 
-// combined with a full expansion
+// combine a full expansion with a narrowed one
 await postsSvc.getFullList({ expand: ['author', 'category.name'] });
 ```
 
-> **How this works:** PocketBase's `expand` only understands *relations*, so
-> `expand=author.name` on its own does nothing. Lazypock detects that `name`
-> is not a relation and rewrites the query to
-> `expand=author&fields=…,expand.author.name` for you.
+The SDK applies this selection itself, so it works the same against every
+server: PocketBase narrows it server-side, the LazyPock server returns the
+full related record and the SDK keeps only the requested fields.
+
+> **How this works:** `expand` only understands *relations* —
+> `expand=author.name` on its own is ignored. The SDK detects that `name` is
+> not a relation, asks for the `author` relation instead, and then keeps only
+> the requested fields.
 >
 > Distinguishing "field on the relation" from "nested relation" needs the
 > target collection's schema. The codegen `createClient()` wires schemas in
@@ -330,12 +328,11 @@ const posts = await postsSvc.getFullList({
 });
 ```
 
-### Filter on a field of the related record
-
-```typescript
-const q = postsSvc.where;
-await postsSvc.getFullList({ filter: q('author.email').eq(email) });
-```
+> To filter on a field *of* the related record, resolve the related id first
+> and filter by the relation (`q('author').eq(userId)`), or filter against a
+> denormalized copy of that field. The LazyPock filter engine compiles
+> top-level fields only — relation dot-paths (`author.email = 'x'`) return
+> `400`.
 
 ### Filter by status, newest first, expand the author
 

@@ -14,7 +14,6 @@ import {
 	type ReadOptions,
 	type FilterString,
 	type FieldKey,
-	type FilterableKey,
 	type ExpandObj,
 } from "./types";
 import type { RealtimeService } from "./realtime";
@@ -129,6 +128,20 @@ function normalizeAction(
 	return "update";
 }
 
+/** A plain JSON object (an expanded record). */
+type ExpandRecord = Record<string, unknown>;
+
+/** Keep only the given keys of a plain object (used for expand narrowing). */
+function pickFields(value: unknown, fields: string[]): ExpandRecord {
+	if (!value || typeof value !== "object") return {};
+	const src = value as ExpandRecord;
+	const out: ExpandRecord = {};
+	for (const f of fields) {
+		if (f in src) out[f] = src[f];
+	}
+	return out;
+}
+
 /**
  * Resolves a collection schema by name or id. Supplied by
  * {@link LazypockClient} so a service can follow relation fields into their
@@ -145,8 +158,13 @@ interface NormalizedExpand {
 	expand?: string;
 	/** `fields` entries that keep/narrow the expanded data. */
 	fieldSelectors: string[];
-	/** True when a token selects specific fields (needs a `fields` param). */
-	narrows: boolean;
+	/**
+	 * Top-level relation → leaf field names to keep on the expanded record.
+	 * Applied client-side so field selection also works on servers that don't
+	 * project expanded records (the LazyPock server, unlike PocketBase, always
+	 * returns the full related record).
+	 */
+	narrow: Map<string, string[]>;
 }
 
 /**
@@ -333,11 +351,15 @@ export class CollectionService<
 	 * ```
 	 *
 	 * Chain `.and()` / `.or()` / `.not()` to compose. A `FilterExpr` can be
-	 * passed anywhere a `filter` string is accepted. Relation dot-paths
-	 * (`where("author.email")`) are supported, and `where("id").in(ids)`
+	 * passed anywhere a `filter` string is accepted, and `where("id").in(ids)`
 	 * covers list membership without hand-written OR chains.
+	 *
+	 * Fields are top-level collection fields. Relation *dot-paths*
+	 * (`author.email`) are not accepted here because the server's filter
+	 * engine compiles field tokens only — filter by the relation id instead
+	 * (`where("author").eq(userId)`).
 	 */
-	where<F extends FilterableKey<TFields>>(field: F): FilterBuilder<F> {
+	where<F extends FieldKey<TFields>>(field: F): FilterBuilder<F> {
 		return new FilterBuilder<F>(field);
 	}
 
@@ -417,12 +439,13 @@ export class CollectionService<
 	 * dotted tokens sharing the same relation are treated as field selection.
 	 */
 	private normalizeExpand(expand: string | undefined): NormalizedExpand {
-		if (!expand) return { fieldSelectors: [], narrows: false };
+		const narrow = new Map<string, string[]>();
+		if (!expand) return { fieldSelectors: [], narrow };
 		const tokens = expand
 			.split(",")
 			.map((t) => t.trim())
 			.filter(Boolean);
-		if (tokens.length === 0) return { fieldSelectors: [], narrows: false };
+		if (tokens.length === 0) return { fieldSelectors: [], narrow };
 
 		const relations = this.schema?.fields
 			? new Set(
@@ -500,7 +523,6 @@ export class CollectionService<
 		const expandSeen = new Set<string>();
 		const fieldSelectors: string[] = [];
 		const selectorSeen = new Set<string>();
-		let narrows = false;
 		const pushParam = (p: string) => {
 			if (!expandSeen.has(p)) {
 				expandSeen.add(p);
@@ -519,44 +541,99 @@ export class CollectionService<
 				pushParam(t.token);
 				pushSelector(`expand.${t.token}`);
 			} else if (t.kind === "nested") {
-				pushParam(t.token);
+				// Send every relation prefix (`a`, `a.b`, `a.b.c`). PocketBase
+				// resolves the full chain; servers that only expand one level
+				// (LazyPock) still resolve the leading relation instead of
+				// silently expanding nothing.
+				for (let i = 1; i <= t.segments.length; i++) {
+					pushParam(t.segments.slice(0, i).join("."));
+				}
 				pushSelector(`expand.${t.segments[0]}`);
 			} else {
-				narrows = true;
 				const depth = Math.max(1, t.depth);
 				const relationPath = t.segments.slice(0, depth).join(".");
 				pushParam(relationPath);
 				pushSelector(`expand.${t.segments.slice(0, depth + 1).join(".")}`);
+				// Single-level field selection (`author.name`) is also applied
+				// client-side (see `applyExpandNarrowing`) so it works on servers
+				// that always return the full expanded record.
+				if (t.segments.length === depth + 1) {
+					const base = t.segments[0];
+					const leaf = t.segments[depth];
+					const leaves = narrow.get(base) ?? [];
+					if (!leaves.includes(leaf)) leaves.push(leaf);
+					narrow.set(base, leaves);
+				}
 			}
 		}
 
 		return {
 			expand: expandParams.length > 0 ? expandParams.join(",") : undefined,
 			fieldSelectors,
-			narrows,
+			narrow,
 		};
+	}
+
+	/**
+	 * Keep only the requested leaf fields on `record.expand.<relation>`.
+	 *
+	 * Mirrors PocketBase's server-side `fields=expand.<rel>.<field>` projection
+	 * for servers that don't support it (the LazyPock server), so field
+	 * selection behaves the same against both. A no-op when the server already
+	 * narrowed the record. Multi-relations are narrowed element-wise.
+	 */
+	private applyExpandNarrowing<T>(
+		record: T,
+		narrow: Map<string, string[]>,
+	): T {
+		if (narrow.size === 0) return record;
+		const rec = record as Record<string, unknown>;
+		const expand = rec.expand as Record<string, unknown> | undefined;
+		if (!expand || typeof expand !== "object") return record;
+
+		const next: Record<string, unknown> = { ...expand };
+		for (const [relation, leaves] of narrow) {
+			const value = next[relation];
+			if (value === undefined || value === null) continue;
+			next[relation] = Array.isArray(value)
+				? value.map((el) => pickFields(el, leaves))
+				: pickFields(value, leaves);
+		}
+		return { ...rec, expand: next } as T;
 	}
 
 	/**
 	 * Merge the expand-preserving selectors into the base field projection.
 	 *
-	 * PocketBase's `fields` param is strict: without an `expand.*` entry the
-	 * whole `expand` payload is dropped. When no projection is active and the
-	 * caller only asked for (full) relations, no `fields` param is sent at
-	 * all — the server keeps `expand` on its own.
+	 * Both servers are kept happy at once:
+	 * - PocketBase drops the whole `expand` payload unless an `expand.<key>`
+	 *   entry is present in `fields`;
+	 * - the LazyPock server projects first (strict, top-level only) and then
+	 *   expands, so the relation *field* itself must be present in `fields`.
+	 *
+	 * We therefore add both the relation field (`cate`) and the
+	 * `expand.<key>` entry. When no projection is active, no `fields` param is
+	 * sent at all — a value like `*` plus other tokens is not a wildcard on
+	 * the LazyPock server (it is a strict take, yielding empty records) and
+	 * the server keeps `expand` by default when `fields` is absent.
 	 */
 	private mergeExpandFields(
 		base: string | undefined,
 		info: NormalizedExpand,
 	): string | undefined {
 		if (info.fieldSelectors.length === 0) return base;
-		if (base === undefined && !info.narrows) return undefined;
+		if (base === undefined) return undefined;
 
-		const parts = (base ?? "*")
+		const parts = base
 			.split(",")
 			.map((f) => f.trim())
 			.filter(Boolean);
 		const seen = new Set(parts);
+		const push = (value: string) => {
+			if (seen.has(value)) return;
+			seen.add(value);
+			parts.push(value);
+		};
 		// A full `expand.<key>` selector already includes any narrower
 		// `expand.<key>.<field>` selection — drop the redundant narrow ones.
 		const fullKeys = new Set<string>();
@@ -567,9 +644,8 @@ export class CollectionService<
 		for (const selector of info.fieldSelectors) {
 			const seg = selector.split(".");
 			if (seg.length > 2 && fullKeys.has(seg[1])) continue;
-			if (seen.has(selector)) continue;
-			seen.add(selector);
-			parts.push(selector);
+			if (seg.length >= 2) push(seg[1]);
+			push(selector);
 		}
 		return parts.join(",");
 	}
@@ -581,7 +657,7 @@ export class CollectionService<
 	 * @param perPage Records per page (default 30).
 	 * @param options Query params (`filter`, `sort`, `expand`, `fields`) + request options.
 	 */
-	getList<
+	async getList<
 		T2 = T,
 		E extends string = never,
 		S extends string = never,
@@ -638,19 +714,26 @@ export class CollectionService<
 				}).map(([k, v]) => [k, String(v)]),
 			),
 		).toString();
-		return this.http.get<ListResult<T2 & { expand?: ExpandObj<E, TExpand> }>>(
-			"/" + this.encodeId(this.collectionName) + "?" + qs,
-			{
-				requestKey,
-				autoCancel,
-				cancelKey,
-				fetch,
-				headers,
-				signal,
-				singleFlight,
-				params,
-			} as RequestOptions,
-		);
+		const result = await this.http.get<
+			ListResult<T2 & { expand?: ExpandObj<E, TExpand> }>
+		>("/" + this.encodeId(this.collectionName) + "?" + qs, {
+			requestKey,
+			autoCancel,
+			cancelKey,
+			fetch,
+			headers,
+			signal,
+			singleFlight,
+			params,
+		} as RequestOptions);
+		// Field selection on expanded records is applied here as well (no-op
+		// when the server already narrowed, e.g. PocketBase).
+		if (result && expandInfo.narrow.size > 0) {
+			result.items = result.items.map((item) =>
+				this.applyExpandNarrowing(item, expandInfo.narrow),
+			);
+		}
+		return result;
 	}
 
 	/**
@@ -726,7 +809,7 @@ export class CollectionService<
 	 * @param id Record ID.
 	 * @param options Optional request options.
 	 */
-	getOne<E extends string = never>(
+	async getOne<E extends string = never>(
 		id: string,
 		options?: ReadOptions<TFields, E> & RequestOptions,
 	): Promise<(T & { expand?: ExpandObj<E, TExpand> }) | null> {
@@ -747,7 +830,7 @@ export class CollectionService<
 			qs.set("expand", expandInfo.expand ?? rawExpand);
 		}
 		const qsStr = qs.toString();
-		return this.http.get<T & { expand?: ExpandObj<E, TExpand> }>(
+		const record = await this.http.get<T & { expand?: ExpandObj<E, TExpand> }>(
 			"/" +
 				this.encodeId(this.collectionName) +
 				"/" +
@@ -755,6 +838,10 @@ export class CollectionService<
 				(qsStr ? "?" + qsStr : ""),
 			options,
 		);
+		if (record && expandInfo.narrow.size > 0) {
+			return this.applyExpandNarrowing(record, expandInfo.narrow);
+		}
+		return record;
 	}
 
 	/**
