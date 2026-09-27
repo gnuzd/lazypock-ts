@@ -1282,6 +1282,33 @@ await (async () => {
 			"title ?~ 'news'",
 		);
 		check("where eq(null) emits null", q("title").eq(null).toString(), "title = null");
+		check(
+			"where in() builds an OR chain",
+			q("id").in(["a", "b", "c"]).toString(),
+			"(id = 'a' || id = 'b' || id = 'c')",
+		);
+		check(
+			"where notIn() builds an AND chain",
+			q("id").notIn(["a", "b"]).toString(),
+			"(id != 'a' && id != 'b')",
+		);
+		check(
+			"where in() escapes values",
+			q("id").in(["a'b"]).toString(),
+			"(id = 'a\\'b')",
+		);
+		check(
+			"where in() composes with and() without precedence bugs",
+			q("id").in(["a", "b"]).and(q("title").eq("x")).toString(),
+			"((id = 'a' || id = 'b') && title = 'x')",
+		);
+		let inThrew = false;
+		try {
+			q("id").in([]);
+		} catch {
+			inThrew = true;
+		}
+		check("where in([]) throws", inThrew, true);
 
 		await svc.getList(1, 20, {
 			fetch: fetchMock,

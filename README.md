@@ -324,6 +324,8 @@ q('published').eq(true);       // published = true
 q('views').gt(100);            // views > 100
 q('created').gte('2024-01-01');// created >= '2024-01-01'
 q('title').eq(null);           // title = null  (IS NULL)
+q('id').in(['a', 'b', 'c']);   // (id = 'a' || id = 'b' || id = 'c')  — list membership
+q('id').notIn(['a', 'b']);     // (id != 'a' && id != 'b')
 
 // PocketBase `?` array operators (multi-select / multi-relation):
 q('tags').anyEq('news');       // tags ?= 'news'
@@ -338,8 +340,9 @@ await postsSvc.getFirstListItem(q('title').eq('x'));
 
 Methods: `eq`, `neq`, `contains`, `notContains`, `gt`, `gte`, `lt`, `lte`,
 the array variants `anyEq`, `anyNeq`, `anyContains`, `anyNotContains`,
-`anyGt`, `anyGte`, `anyLt`, `anyLte`, plus `and`, `or`, `not` and
-`toString()`. Values are checked as filter scalars
+`anyGt`, `anyGte`, `anyLt`, `anyLte`, and `in` / `notIn` for list membership
+(the long filter for a list of ids is just `q('id').in(ids)`), plus `and`,
+`or`, `not` and `toString()`. Values are checked as filter scalars
 (`string | number | boolean | null`); the server enforces the exact per-field
 type. The raw string form remains fully supported for dynamic/advanced
 expressions.

@@ -84,6 +84,8 @@ q('created').gte('2024-01-01'); // created >= '2024-01-01'
 q('title').eq(null);            // title = null  (IS NULL)
 q('tags').anyEq('news');        // tags ?= 'news'   (array operator)
 q('tags').anyContains('new');   // tags ?~ 'new'
+q('id').in(['a', 'b', 'c']);    // (id = 'a' || id = 'b' || id = 'c')  — list membership
+q('id').notIn(['a', 'b']);      // (id != 'a' && id != 'b')
 
 // Compose with and() / or() / not():
 const filter = q('title').contains('x').and(q('published').eq(true));
@@ -92,7 +94,8 @@ await postsSvc.getFirstListItem(q('title').eq('x'));
 ```
 
 Methods: `eq`, `neq`, `contains`, `notContains`, `gt`, `gte`, `lt`, `lte`, the array variants
-`anyEq`, `anyNeq`, `anyContains`, `anyNotContains`, `anyGt`, `anyGte`, `anyLt`, `anyLte`, plus
+`anyEq`, `anyNeq`, `anyContains`, `anyNotContains`, `anyGt`, `anyGte`, `anyLt`, `anyLte`, and
+`in` / `notIn` for list membership (no hand-written `or()` chains for a list of ids), plus
 `and`, `or`, `not`, and `toString()`. Values are checked as filter scalars
 (`string | number | boolean | null`) and the server enforces the exact per-field type. The raw
 string form stays fully supported for dynamic/advanced expressions.

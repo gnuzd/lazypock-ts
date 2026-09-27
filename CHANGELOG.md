@@ -7,7 +7,8 @@
 * **auth:** add OAuth2 sign-in — `authWithOAuth2` (popup flow), `authWithOAuth2Code` (direct code exchange), and typed `listAuthMethods`
 * **queries:** accept arrays for `sort` and `expand` (`sort: ["-title", "published"]`) so editors suggest each field
 * **queries:** add a typed filter builder — `svc.where("title").contains("x").and(svc.where("published").eq(true))`
-  checks field names/operators, escapes values, and works anywhere a `filter` string is accepted
+  checks field names/operators, escapes values, and works anywhere a `filter` string is accepted;
+  `svc.where("id").in([...])` / `.notIn([...])` cover list membership without hand-written OR chains
 
 ### Bug Fixes
 

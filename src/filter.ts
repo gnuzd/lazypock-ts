@@ -120,6 +120,40 @@ export class FilterBuilder<F extends string> {
 		return this.cmp("<=", value);
 	}
 
+	/**
+	 * `field = v1 || field = v2 || …` (value is in the list).
+	 *
+	 * ```ts
+	 * svc.where("id").in(["a", "b", "c"]);
+	 * // → (id = 'a' || id = 'b' || id = 'c')
+	 * ```
+	 */
+	in(values: readonly FilterScalar[]): FilterExpr {
+		return new FilterExpr(this.chain("=", " || ", values));
+	}
+
+	/**
+	 * `field != v1 && field != v2 && …` (value is not in the list).
+	 */
+	notIn(values: readonly FilterScalar[]): FilterExpr {
+		return new FilterExpr(this.chain("!=", " && ", values));
+	}
+
+	/** Build `(field <op> v <join> field <op> v …)`, wrapped for safe composing. */
+	private chain(
+		op: string,
+		join: string,
+		values: readonly FilterScalar[],
+	): string {
+		if (values.length === 0) {
+			throw new Error(
+				`[lazypock] filter: ${op === "=" ? "in" : "notIn"}() requires at least one value`,
+			);
+		}
+		const clauses = values.map((v) => `${this.field} ${op} ${literal(v)}`);
+		return `(${clauses.join(join)})`;
+	}
+
 	/** `field ?= value` — at least one array element equals `value`. */
 	anyEq(value: FilterScalar): FilterExpr {
 		return this.cmp("?=", value);
