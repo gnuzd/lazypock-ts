@@ -25,6 +25,23 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.14.0](https://github.com/gnuzd/lazypock-ts/compare/v0.13.0...v0.14.0) (2026-09-27)
+
+
+### Features
+
+* **filter:** accept relation dot-paths in where() ([276b9b9](https://github.com/gnuzd/lazypock-ts/commit/276b9b902d260d6307568f0185be85a30de80d8e))
+* **filter:** add in() / notIn() list membership to the builder ([d2310f2](https://github.com/gnuzd/lazypock-ts/commit/d2310f2a4b1b18177dc79aeb4add080c947d9ce3))
+* **filter:** re-enable relation dot-paths in where() ([2414343](https://github.com/gnuzd/lazypock-ts/commit/2414343a94bd680725119b72018be8df1220c691))
+* **queries:** array sort/expand + typed filter builder ([b284a6b](https://github.com/gnuzd/lazypock-ts/commit/b284a6b2ab75d76ac88fb4335d76267dd3c5e2c8))
+* **queries:** expand field selection + editor autocomplete (array sort/expand, typed filter builder) ([0616a2e](https://github.com/gnuzd/lazypock-ts/commit/0616a2ecbc1f32ec22e32cbb6981e763c80360ce))
+
+
+### Bug Fixes
+
+* **expand:** keep expansions under field projections + field selection ([36d9801](https://github.com/gnuzd/lazypock-ts/commit/36d9801968ac4dc3f64efc5612b2d97db90125f9))
+* **queries:** make expand/filter features work against the LazyPock server ([df5238e](https://github.com/gnuzd/lazypock-ts/commit/df5238e1ce4350ba1fec77c24419ad699fd22510))
+
 ## [0.13.0](https://github.com/gnuzd/lazypock-ts/compare/v0.12.0...v0.13.0) (2026-09-23)
 
 
