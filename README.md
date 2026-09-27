@@ -246,155 +246,136 @@ const session = await client.authWithPassword('users', 'ada@example.com', 'corre
 const whoami = await client.me(); // fresh record via GET /api/me
 ```
 
-### `filter` / `sort` / `expand` — type-checked suggestions
+### Filtering, sorting & expanding
 
-With a typed service, the query options validate field names (and filter
-operators) at compile time — your editor suggests valid fields as you type:
+Typed services validate every `filter` / `sort` / `expand` field at compile
+time. Use the **array** forms of `sort`/`expand` and the typed `where()`
+builder to get **autocomplete** while you type.
 
 ```typescript
-await postsSvc.getList(1, 20, { sort: '-title' });        // ✓ suggests title/published/…
-await postsSvc.getList(1, 20, { sort: '-nope' });         // ✗ compile error
-await postsSvc.getList(1, 20, { sort: 'title, nope' });   // ✗ every token checked
-// Arrays give full autocomplete (and the same validation):
-await postsSvc.getList(1, 20, { sort: ['-title', 'published'] }); // ✓ suggested
-await postsSvc.getList(1, 20, { expand: ['author', 'owner.name'] });
+const q = postsSvc.where; // typed filter builder
 
-await postsSvc.getList(1, 20, {
-  filter: "title ~ 'x' && published = true", // ✓ every clause field + operator checked
+await postsSvc.getList(1, 20, { sort: ['-created'] });                // sort
+await postsSvc.getFullList({ filter: q('id').in(ids) });              // filter by ids
+await postsSvc.getList(1, 20, { filter: q('title').contains(term) }); // search
+await postsSvc.getFullList({
+  filter: q('published').eq(true),
+  expand: ['author.name'],
 });
-await postsSvc.getList(1, 20, { filter: `title=${search}` }); // ✓ spaces optional
-await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" }); // ✓ parens
-await postsSvc.getList(1, 20, { filter: "author.email = 'x'" }); // ✓ relation dot-path
-await postsSvc.getList(1, 20, { filter: "tags ?= 'news'" }); // ✓ any/at-least-one-of
-await postsSvc.getList(1, 20, { filter: 'nope = 1' });    // ✗ compile error
-await postsSvc.getList(1, 20, {
-  filter: "title = 'a' && nope = 'y'", // ✗ EVERY clause is validated
-});
-
-// …or build the filter with the typed builder (field names suggested,
-// values escaped for you):
-const q = postsSvc.where;
-await postsSvc.getList(1, 20, {
-  filter: q('title').contains('x').and(q('published').eq(true)),
-  // → filter=(title ~ '%x%' && published = true)
-});
-await postsSvc.getList(1, 20, { filter: q('tags').anyEq('news') }); // ?= operator
-
-await postsSvc.getList(1, 20, { expand: 'author' });      // ✓ field suggested
-await postsSvc.getList(1, 20, { expand: 'author.user' }); // ✓ nested dot-path
-await postsSvc.getList(1, 20, { expand: 'author, nope' }); // ✗ every token checked
-await postsSvc.getList(1, 20, { expand: 'author.name,author.email' }); // ✓ expand + select fields
-await postsSvc.getOne('abc', { expand: 'author' });
-
-// Expanded records carry an `expand` property keyed by the requested fields,
-// typed to the target collection's record (codegen client):
-const posts = await postsSvc.getFullList({ expand: 'author' });
-posts[0].expand?.author?.email; // ✓ typed, not unknown
 ```
 
-- `filter` — `field op value` clauses with `= != ~ !~ > >= < <=` operators,
-  plus the PocketBase `?`-prefixed array operators `?= ?!= ?~ ?!~ ?> ?>= ?< ?<=`
-  ("any/at-least-one-of" over multi-select / multiple relation / multiple file
-  fields: `tags ?= 'news'`); spaces around the operator are optional; `&&`,
-  `||`, `!`, and parentheses are allowed; relation dot-paths like
-  `author.email = 'x'` typecheck. **Every** clause's field name and operator
-  are validated — a typo in any clause is a compile error, and quoted values
-  may contain `&&`/`||` (e.g. `title ~ 'a && b'`). Field names and operators
-  are suggested as you type.
-- `sort` — `field`, `-field` (desc), `+field`, or comma-separated. **Every**
-  token is validated. Prefer the **array** form (`['-title', 'published']`)
-  when you want editor autocomplete: a comma-separated string is only
-  validated as a whole (template-literal types can't suggest each token).
-- `expand` — comma-separated relation field names, including nested dot-paths
-  (`author.user`); **every** token is validated; non-relation fields warn at
-  runtime when a schema is available. The **array** form
-  (`['author', 'owner.name']`) gives per-token autocomplete.
+| I want to… | Do this |
+| --- | --- |
+| Sort newest first | `getList(1, 20, { sort: ['-created'] })` |
+| Filter by a list of ids | `getFullList({ filter: postsSvc.where('id').in(ids) })` |
+| Search a text field | `getList(1, 20, { filter: postsSvc.where('title').contains(term) })` |
+| Both conditions (AND) | `q('published').eq(true).and(q('views').gt(100))` |
+| Either condition (OR) | `q('a').eq(1).or(q('b').eq(2))` |
+| Negate a condition | `q('archived').eq(true).not()` |
+| Filter on a related field | `q('author.email').eq('ada@example.com')` |
+| Expand a relation | `getList(1, 20, { expand: ['author'] })` |
+| Only some expanded fields | `getList(1, 20, { expand: ['author.name'] })` |
+| Return only some fields | `client.collection('posts').select('id', 'title').getList()` |
 
-**Filter builder.** `service.where(field)` starts a type-checked expression.
-The field name is suggested from the collection's key set and the operator is
-a method, so typos are impossible; values are quoted/escaped by the builder
-(no manual interpolation):
+#### Sorting
+
+```typescript
+await postsSvc.getList(1, 20, { sort: '-created' });              // string
+await postsSvc.getList(1, 20, { sort: ['title', '-published'] }); // array — suggests each field
+```
+
+`-field` = descending, `+field` / `field` = ascending. **Every** token is
+validated (array and string alike); the array form adds per-field
+autocomplete.
+
+#### Filtering — string expressions
+
+Full PocketBase syntax, validated clause by clause — a typo in any clause is
+a compile error:
+
+```typescript
+await postsSvc.getList(1, 20, { filter: "title ~ 'hello' && published = true" });
+await postsSvc.getList(1, 20, { filter: "(title = 'a' || title = 'b')" });
+await postsSvc.getList(1, 20, { filter: "author.email = 'x'" }); // relation dot-path
+await postsSvc.getList(1, 20, { filter: "tags ?= 'news'" });     // any array element
+```
+
+| Operator | Meaning |
+| --- | --- |
+| `=` `!=` | equal / not equal |
+| `~` `!~` | contains / does not contain |
+| `>` `>=` `<` `<=` | comparisons |
+| `?=` `?!=` `?~` `?!~` `?>` `?>=` `?<` `?<=` | "any element matches" variants for array fields |
+
+#### Filtering — typed builder
+
+`service.where(field)` suggests field names, turns operators into methods, and
+escapes values (no manual quoting):
 
 ```typescript
 const q = postsSvc.where;
-q('title').eq('x');            // title = 'x'
-q('title').contains('x');      // title ~ 'x'
-q('title').notContains('x');   // title !~
-q('published').eq(true);       // published = true
-q('views').gt(100);            // views > 100
-q('created').gte('2024-01-01');// created >= '2024-01-01'
-q('title').eq(null);           // title = null  (IS NULL)
-q('id').in(['a', 'b', 'c']);   // (id = 'a' || id = 'b' || id = 'c')  — list membership
-q('id').notIn(['a', 'b']);     // (id != 'a' && id != 'b')
 
-// PocketBase `?` array operators (multi-select / multi-relation):
-q('tags').anyEq('news');       // tags ?= 'news'
-q('tags').anyContains('new');  // tags ?~ 'new'
+q('title').eq('x');             // title = 'x'
+q('title').contains('x');       // title ~ 'x'
+q('published').eq(true);        // published = true
+q('views').gte(100);            // views >= 100
+q('title').eq(null);            // title = null  (is empty)
+q('id').in(['a', 'b', 'c']);    // (id = 'a' || id = 'b' || id = 'c')  — list membership
+q('id').notIn(['a', 'b']);      // (id != 'a' && id != 'b')
+q('author.email').eq('x');      // relation dot-path
+q('tags').anyEq('news');        // any array element equals
 
-// Compose — and() / or() / not():
-const filter = q('title').contains('x').and(q('published').eq(true));
-const filter2 = q('a').eq(1).or(q('b').eq(2)).not();
-await postsSvc.getList(1, 20, { filter });
-await postsSvc.getFirstListItem(q('title').eq('x'));
+// combine — and() / or() / not()
+q('title').contains('x').and(q('published').eq(true)); // (… && …)
+q('a').eq(1).or(q('b').eq(2)).not();                   // !((… || …))
 ```
 
-Methods: `eq`, `neq`, `contains`, `notContains`, `gt`, `gte`, `lt`, `lte`,
-the array variants `anyEq`, `anyNeq`, `anyContains`, `anyNotContains`,
-`anyGt`, `anyGte`, `anyLt`, `anyLte`, and `in` / `notIn` for list membership
-(the long filter for a list of ids is just `q('id').in(ids)`), plus `and`,
-`or`, `not` and `toString()`. Values are checked as filter scalars
-(`string | number | boolean | null`); the server enforces the exact per-field
-type. The raw string form remains fully supported for dynamic/advanced
-expressions.
+| Comparison | Emits | Array (`any…`) | Emits |
+| --- | --- | --- | --- |
+| `eq(v)` | `field = v` | `anyEq(v)` | `field ?= v` |
+| `neq(v)` | `field != v` | `anyNeq(v)` | `field ?!= v` |
+| `contains(v)` | `field ~ v` | `anyContains(v)` | `field ?~ v` |
+| `notContains(v)` | `field !~ v` | `anyNotContains(v)` | `field ?!~ v` |
+| `gt(v)` / `gte(v)` | `field > v` / `field >= v` | `anyGt(v)` / `anyGte(v)` | `field ?> v` / `field ?>= v` |
+| `lt(v)` / `lte(v)` | `field < v` / `field <= v` | `anyLt(v)` / `anyLte(v)` | `field ?< v` / `field ?<= v` |
+| `in(values)` | `(field = a \|\| field = b \|\| …)` | `notIn(values)` | `(field != a && field != b && …)` |
 
-**Selecting fields of an expanded relation.** PocketBase's `expand` only
-understands relations: `expand=author.name` is silently ignored (and even
-cancels the `author` expansion) because `name` is not a relation. Lazypock
-detects a dotted tail that is not a relation and rewrites the query to the
-correct PocketBase form, so the shorthand just works:
+Values may be `string | number | boolean | null`; the server enforces the
+per-field type. An empty `in([])` / `notIn([])` throws. A built expression
+can be passed anywhere a `filter` string is accepted — including
+`getFirstListItem(q('slug').eq('hello-world'))`.
+
+#### Expanding relations
+
+`expand` attaches the related record(s) under `record.expand`; the relation
+field itself keeps the id:
 
 ```typescript
-await postsSvc.getFullList({ expand: 'author.name,author.email' });
-// → GET /api/posts?expand=author&fields=*,expand.author.name,expand.author.email
-// posts[0].expand.author === { name: '…', email: '…' }
+await postsSvc.getOne('abc', { expand: 'author' });            // full related record
+await postsSvc.getFullList({ expand: ['author', 'category'] }); // array form
+await postsSvc.getFullList({ expand: ['author.profile'] });     // nested relation
+await postsSvc.getFullList({ expand: ['author.name', 'author.email'] }); // only some fields
 ```
 
-A dotted path whose segments are all **relations** keeps its nested-expand
-meaning (`expand: 'author.user'` expands the `user` relation on the author).
-Disambiguation needs the target collection's schema — the codegen
-`createClient()` wires it in automatically. Without one, two or more dotted
-tokens under the same relation (e.g. `author.name,author.email`) are treated
-as a field selection, while a lone dotted token stays a nested relation and
-logs a warning.
-
-A field projection (`select(...)`, the schema default, or an explicit
-`fields`) is preserved: the expand entries are merged in so the expanded data
-is never silently dropped by the server's strict `fields` filter.
-
-**Expanded records are typed.** When a list/read is called with `expand`,
-the returned records include an optional `expand` object whose keys are the
-requested top-level relation fields (`record.expand.author` — dot-paths
-collapse to their first segment). With the codegen client, each value is
-typed as its **target collection's record** — the generated `*ExpandMap`
-types resolve relation fields to their target record type, so
-`record.expand.user` is `UsersRecord`, not `unknown`:
-
-```typescript
-const posts = await postsSvc.getFullList({ expand: 'author' });
-posts[0].expand?.author?.email; // ✓ typed UsersRecord (auth → has email)
-```
-
-Multi-relations (`maxSelect > 1`) expand to `Array<TargetRecord>`, auth
-targets carry the `AuthRecord` fields, and unknown/unresolvable targets fall
-back to `unknown`. Hand-written services (no schema, e.g.
-`createClient<MyCollections>()`) keep `unknown` values.
+- `record.expand.author` is the related record; `record.author` is the id.
+- Field selection (`author.name`) is rewritten to PocketBase's
+  `expand=author&fields=…,expand.author.name` — the server ignores
+  `expand=author.name` on its own.
+- Distinguishing a field (`author.name`) from a nested relation
+  (`author.profile`) needs the target schema. Codegen's `createClient()` wires
+  it in automatically; with a hand-written client, pass `types.schemas`.
+- On a typed service, `record.expand.author` is typed as the target record
+  (`record.expand.user` is `UsersRecord`, not `unknown`); multi-relations
+  (`maxSelect > 1`) become arrays.
+- If a `select()` / `fields` projection is active, the `expand.*` entries are
+  merged in, so the expanded data is never dropped.
 
 **Hidden fields are queryable.** A hidden relation is excluded from the read
-model (no `record.user`) but the server still resolves it for
-`filter`/`sort`/`expand`/`select` — the generated `*QueryFields` type keeps
-those keys accepted, so `getFullList({ expand: "user" })` typechecks for a
-hidden relation (and `record.expand?.user` is typed to the target record on
-the result).
+model but the server still resolves it for `filter` / `sort` / `expand` /
+`select`.
+
+> **Full guide with more recipes** (ids, search, relation filters, status
+> queries): [Queries](https://lazypock.gnuzd.dev/sdk/typescript/queries).
 
 - The **untyped** client (`client.collection('posts')` without `typed<T>()`)
   still accepts any string — suggestions kick in once the service is typed.
@@ -468,11 +449,16 @@ PocketBase-style service for the collections themselves (admin):
 
 Returned by `client.collection(name)`.
 
+- `where(field)` — Start a **typed filter clause** (`where('id').in(ids)`, `where('title').contains(x)`);
+  field names are checked/suggested and values escaped — see [Filtering](#filtering-sorting--expanding)
 - `select(...fields)` — Project reads to the given fields (see [Field projection](#field-projection-select--query-suggestions)); `select('*')` restores the all-visible default
-- `getList(page, perPage, options?)` — Paginated list of records (typed `filter`/`sort`/`expand`/`fields`)
+- `getList(page, perPage, options?)` — Paginated list of records (typed `filter`/`sort`/`expand`/`fields`; `sort`/`expand` accept a string or an array)
 - `getFullList(options?)` — Fetch all records (auto-paginates)
-- `getFirstListItem(filter, options?)` — Fetch first record matching filter
+- `getFirstListItem(filter, options?)` — Fetch first record matching filter (`filter` may be a string or a `FilterExpr`)
 - `getOne(id, options?)` — Get record by ID
+- `expandFields(options?)` — List the collection's relation fields (for building `expand`)
+- `typed<T>()` — Cast the service to a record shape (compile-time only)
+- `withSchema(schema)` — Bind a schema explicitly (hidden-field exclusion + query checking)
 - `create(data, options?)` — Create record
 - `update(id, data, options?)` — Update record
 - `delete(id, options?)` — Delete record

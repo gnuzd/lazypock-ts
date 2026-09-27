@@ -100,6 +100,29 @@ The codegen CLI emits a `lazypockSchema` snapshot next to the types, and the gen
 wires it in automatically — so the schema-driven behaviour below (hidden-field exclusion, query
 validation) works out of the box.
 
+## Query autocomplete
+
+On a typed service, `filter` / `sort` / `expand` are validated at compile time.
+For per-field **autocomplete**, use the array forms of `sort`/`expand` and
+the typed filter builder:
+
+```typescript
+const q = client.collection('posts').where;
+
+client.collection('posts').getList(1, 20, { sort: ['-created'] });
+client.collection('posts').getList(1, 20, { expand: ['author.name'] });
+client.collection('posts').getList(1, 20, {
+  filter: q('title').contains('x').and(q('published').eq(true))
+});
+```
+
+- `sort: ['-created']` — the editor suggests each field (`-created`, `title`, …).
+- `expand: ['author.name']` — relation fields are suggested.
+- `q('title')` — field names are suggested, operators are methods, and
+  values are escaped for you.
+
+See [Queries](/sdk/typescript/queries) for the full guide.
+
 ## CLI reference
 
 ```

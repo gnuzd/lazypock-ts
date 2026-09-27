@@ -32,22 +32,77 @@ PocketBase-style service for the collections themselves (admin):
 
 ## CollectionService
 
-Returned by `client.collection(name)`.
+Returned by `client.collection(name)`. All reads accept typed query options —
+see [Queries](/sdk/typescript/queries) for the full guide.
 
+- `where(field)` — start a **typed filter clause** (see below)
 - `select(...fields)` — Project reads to the given fields (see [Queries](/sdk/typescript/queries));
   `select('*')` restores the all-visible default
 - `getList(page, perPage, options?)` — Paginated list of records (typed `filter`/`sort`/`expand`/`fields`)
 - `getFullList(options?)` — Fetch all records (auto-paginates)
-- `getFirstListItem(filter, options?)` — Fetch first record matching filter
+- `getFirstListItem(filter, options?)` — Fetch first record matching filter; `filter` may be a string or a `FilterExpr`
 - `getOne(id, options?)` — Get record by ID
+- `expandFields(options?)` — List the collection's relation fields (for building `expand`)
 - `create(data, options?)` — Create record
 - `update(id, data, options?)` — Update record
 - `delete(id, options?)` — Delete record
 - `subscribe(callback, recordId?)` — Subscribe to record changes (PocketBase-style)
 - `unsubscribe(recordId?)` — Unsubscribe
+- `typed<T>()` — Cast this service to a record shape (compile-time only)
+- `withSchema(schema)` — Bind a schema explicitly (hidden-field exclusion + query checking)
 - `authWithPassword(identity, password, options?)` — Login to this auth collection
 - `authRefresh(options?)` — Refresh token for this auth collection
 - `authMethods(options?)` — Get available auth methods
+
+### Query options
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `filter` | `string \| FilterExpr` | PocketBase filter expression, or a builder expression |
+| `sort` | `string \| string[]` | Field(s) to sort by; `-field` = descending |
+| `expand` | `string \| string[]` | Relation field(s) to expand (`author`, `author.name`, `author.profile`) |
+| `fields` | `string` | Explicit field projection for this call (overrides `select()`) |
+| `requestKey` | `string \| null` | Override/disable auto-cancellation for this request |
+| `singleFlight` | `boolean` | Coalesce concurrent identical requests |
+| `fetch` | `typeof fetch` | Custom fetch (tests / React Native) |
+| `signal` | `AbortSignal` | Abort signal |
+| `headers` | `Record<string, string>` | Extra request headers |
+
+Use the **array** form of `sort`/`expand` to get per-field autocomplete; the
+string form works identically but is validated as a whole.
+
+### Filter builder
+
+`client.collection('posts').where('title')` returns a `FilterBuilder`. Field
+names are checked/suggested against the collection and values are escaped.
+
+```typescript
+const q = client.collection('posts').where;
+
+q('title').eq('x');                          // title = 'x'
+q('title').contains('x');                    // title ~ 'x'
+q('views').gte(100);                         // views >= 100
+q('id').in(['a', 'b', 'c']);                 // (id = 'a' || id = 'b' || id = 'c')
+q('id').notIn(['a', 'b']);                   // (id != 'a' && id != 'b')
+q('author.email').eq('ada@example.com');     // relation dot-path
+q('title').eq('x').and(q('published').eq(true));
+q('a').eq(1).or(q('b').eq(2)).not();
+```
+
+| Method | Emits | | Method | Emits |
+| --- | --- | --- | --- | --- |
+| `eq(v)` | `field = v` | | `anyEq(v)` | `field ?= v` |
+| `neq(v)` | `field != v` | | `anyNeq(v)` | `field ?!= v` |
+| `contains(v)` | `field ~ v` | | `anyContains(v)` | `field ?~ v` |
+| `notContains(v)` | `field !~ v` | | `anyNotContains(v)` | `field ?!~ v` |
+| `gt(v)` / `gte(v)` | `field > v` / `field >= v` | | `anyGt(v)` / `anyGte(v)` | `field ?> v` / `field ?>= v` |
+| `lt(v)` / `lte(v)` | `field < v` / `field <= v` | | `anyLt(v)` / `anyLte(v)` | `field ?< v` / `field ?<= v` |
+| `in(values)` | `(field = a \|\| field = b \|\| …)` | | `and(other)` | `(a && b)` |
+| `notIn(values)` | `(field != a && field != b && …)` | | `or(other)` / `not()` | `(a \|\| b)` / `!(a)` |
+
+Values may be `string | number | boolean | null`; the server enforces the
+exact per-field type. The raw string form remains available for dynamic or
+advanced expressions.
 
 ## Types
 
