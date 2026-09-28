@@ -55,6 +55,8 @@ export type {
 	FilterOp,
 	FieldKey,
 	FilterableKey,
+	FilterInput,
+	FilterWhere,
 	// options
 	LazypockClientOptions,
 } from "./lazypock";

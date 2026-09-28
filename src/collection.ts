@@ -12,7 +12,7 @@ import {
 	type UpdateData,
 	type ListOptions,
 	type ReadOptions,
-	type FilterString,
+	type FilterInput,
 	type FieldKey,
 	type FilterableKey,
 	type ExpandObj,
@@ -362,6 +362,20 @@ export class CollectionService<
 	}
 
 	/**
+	 * Resolve a `filter` callback into a concrete string / {@link FilterExpr}.
+	 * The callback receives this collection's typed `where` helper, so
+	 * `filter: (w) => w("title").contains("x")` type-checks field names inline.
+	 */
+	private resolveFilter(
+		filter: FilterInput<TFields> | string | undefined,
+	): FilterExpr | string | undefined {
+		if (typeof filter !== "function") {
+			return filter;
+		}
+		return filter((field) => this.where(field));
+	}
+
+	/**
 	 * Resolve the leading relation chain of an expand token against the
 	 * (optionally schema-aware) collection graph.
 	 *
@@ -685,6 +699,13 @@ export class CollectionService<
 			(queryParams as Record<string, unknown>).expand =
 				queryParams.expand.join(",");
 		}
+		// Resolve a `filter` callback (receives the typed `where` helper) into
+		// a concrete string / FilterExpr before serialization.
+		if (typeof queryParams.filter === "function") {
+			(queryParams as Record<string, unknown>).filter = this.resolveFilter(
+				queryParams.filter,
+			);
+		}
 		// Normalise `expand`: dotted tokens that select fields of a relation are
 		// rewritten to PocketBase's `expand` + `fields=expand.<rel>.<field>`
 		// form (raw `expand=owner.name` is silently ignored by the server).
@@ -750,6 +771,12 @@ export class CollectionService<
 	): Promise<Array<T2 & { expand?: ExpandObj<E, TExpand> }>> {
 		const { batch = 1000, ...rest } = options ?? {};
 
+		// Resolve a `filter` callback before computing the dedup key so the key
+		// reflects the actual filter expression (a function is not serializable).
+		if (typeof rest.filter === "function") {
+			(rest as Record<string, unknown>).filter = this.resolveFilter(rest.filter);
+		}
+
 		// Build a stable request key for the whole full-list fetch (NOT per page,
 		// which would break dedup). Concurrent identical getFullList() calls share
 		// this key via single-flight, so they don't fire duplicate requests. Pages
@@ -792,7 +819,7 @@ export class CollectionService<
 		E extends string = never,
 		S extends string = never,
 	>(
-		filter: FilterString<TFields, F> | FilterExpr,
+		filter: FilterInput<TFields, F>,
 		options?: ListOptions<TFields, E, S, F> & RequestOptions,
 	): Promise<(T2 & { expand?: ExpandObj<E, TExpand> }) | null> {
 		const res = await this.getList<T2, E, S, F>(1, 1, {
