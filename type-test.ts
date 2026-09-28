@@ -516,4 +516,18 @@ if (methods) {
 const methodsAlias: AuthMethodsList | null = await oauthUserSvc.authMethods();
 void methodsAlias;
 
+// email / verification / password-reset methods (PocketBase parity)
+const pwResetOk: boolean = await oauthUserSvc.requestPasswordReset("user@example.com");
+const pwResetConfirmOk: boolean = await oauthUserSvc.confirmPasswordReset("tok", "new-pass", "new-pass");
+const verifyReqOk: boolean = await oauthUserSvc.requestVerification("user@example.com");
+const verifiedRecord: User | null = await oauthUserSvc.confirmVerification("tok");
+const emailChangeReqOk: boolean = await oauthUserSvc.requestEmailChange("new@example.com");
+const changedRecord: User | null = await oauthUserSvc.confirmEmailChange("tok", "password");
+void pwResetOk;
+void pwResetConfirmOk;
+void verifyReqOk;
+void verifiedRecord;
+void emailChangeReqOk;
+void changedRecord;
+
 console.log("type-test OK (compile-time checks only)");
