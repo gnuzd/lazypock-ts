@@ -78,6 +78,8 @@ There are two ways to build a filter:
    hand-written queries.
 
 Both produce the same thing and can be mixed: pass either as `filter`.
+For one-off filters you can also build inline with a callback — see
+[Inline filter callback](#inline-filter-callback).
 
 ### Filter expressions (string)
 
@@ -211,6 +213,23 @@ you can still use the raw string for advanced cases:
 await postsSvc.getFirstListItem(q('slug').eq('hello-world'));
 await postsSvc.getList(1, 20, { filter: "title ~ 'x' && published = true" });
 ```
+
+#### Inline filter callback
+
+For a one-off filter, pass a callback instead of binding `where` to a
+variable. The callback receives the same typed `where` helper, so field names
+are still suggested and checked:
+
+```typescript
+await postsSvc.getFullList({
+  filter: (w) => w('title').contains('x').and(w('published').eq(true)),
+});
+
+await postsSvc.getFirstListItem((w) => w('slug').eq('hello-world'));
+```
+
+This is equivalent to the `q` form and works anywhere `filter` is accepted
+(`getList`, `getFullList`, `getFirstListItem`).
 
 ---
 
