@@ -1,6 +1,6 @@
 // ── Record & Collection types ───────────────────────────
 
-import type { FilterExpr } from "./filter";
+import type { FilterExpr, FilterBuilder } from "./filter";
 
 /**
  * Base shape every record returned from any collection satisfies.
@@ -173,6 +173,16 @@ export type FieldKey<T> = Extract<keyof T, string> extends never
 export type FilterableKey<T> =
 	| FieldKey<T>
 	| `${FieldKey<T>}.${string}`;
+
+/**
+ * A typed `where` helper passed to a `filter` callback. Field names are
+ * suggested and type-checked against the collection's key set (including
+ * relation dot-paths), so a callback keeps the same compile-time safety as
+ * {@link CollectionService.where} without a standalone builder.
+ */
+export type FilterWhere<TFields> = <F extends FilterableKey<TFields>>(
+	field: F,
+) => FilterBuilder<F>;
 
 /**
  * Valid filter operators, matching the backend FilterCompiler.
@@ -488,15 +498,33 @@ export type ExpandObj<E extends string, TExpand = Record<string, unknown>> =
  * {@link ExpandString} / {@link SortString} / {@link FilterString} guards.
  */
 /**
+ * A filter for list/read operations:
+ * - a raw PocketBase filter string (`"title ~ 'x'"`), type-checked when
+ *   `TFields` is a concrete shape;
+ * - a pre-built {@link FilterExpr} (from the filter builder);
+ * - a callback receiving a typed `where` helper, e.g.
+ *   `filter: (w) => w("title").contains("x").and(w("published").eq(true))`.
+ */
+export type FilterInput<TFields, F extends string = never> =
+	| FilterString<TFields, F>
+	| FilterExpr
+	| ((where: FilterWhere<TFields>) => FilterExpr);
+
+/**
  * `_T` is kept for backward compatibility (`ListOptions<Post>`) but the
  * per-field validation now runs through the `E`/`S`/`F` generics.
  */
 export interface ListOptions<_T = ApiRecord, E extends string = never, S extends string = never, F extends string = never> {
 	/**
-	 * PocketBase filter expression. Field names + operators are type-checked
-	 * when `T` is a concrete shape.
+	 * PocketBase filter expression. Accepts a raw filter string (field names
+	 * + operators type-checked when `T` is concrete), a pre-built
+	 * {@link FilterExpr}, or a callback receiving a typed `where` helper:
+	 *
+	 * ```ts
+	 * getFullList({ filter: (w) => w("title").contains("x").and(w("published").eq(true)) });
+	 * ```
 	 */
-	filter?: FilterString<_T, F> | FilterExpr;
+	filter?: FilterInput<_T, F>;
 	/**
 	 * Sort field(s): `field`, `-field` (descending). Either a
 	 * comma-separated string or an array whose elements are field-checked.

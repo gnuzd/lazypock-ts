@@ -27,6 +27,8 @@ import {
 	type FilterOp,
 	type FieldKey,
 	type FilterableKey,
+	type FilterInput,
+	type FilterWhere,
 } from "./types";
 import { RealtimeService, wsUrlFromBaseUrl } from "./realtime";
 import type { RealtimeConnectOpts, RealtimeTokenProvider } from "./realtime";
@@ -107,6 +109,8 @@ export type {
 	FilterOp,
 	FieldKey,
 	FilterableKey,
+	FilterInput,
+	FilterWhere,
 };
 
 /** Options for constructing a {@link LazypockClient}. */

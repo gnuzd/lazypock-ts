@@ -1317,6 +1317,19 @@ await (async () => {
 			lastUrl().includes("filter=") && lastUrl().includes("published"),
 			true,
 		);
+
+		// Filter callback: receives the typed `where` helper inline.
+		await svc.getFullList({
+			fetch: fetchMock,
+			filter: (w) => w("title").contains("x").and(w("published").eq(true)),
+		});
+		check(
+			"filter accepts a where-callback",
+			lastUrl().includes("filter=") &&
+				lastUrl().includes("title") &&
+				lastUrl().includes("published"),
+			true,
+		);
 	}
 
 	// 16. client-side field selection on expanded records (servers that always

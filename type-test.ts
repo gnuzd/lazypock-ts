@@ -191,6 +191,17 @@ await postsSvc.getFirstListItem(postsSvc.where("title").eq("a"));
 // @ts-expect-error where rejects unknown fields
 postsSvc.where("nope");
 
+// Filter callback: receives a typed `where` helper inline (no builder bound).
+await postsSvc.getFullList({
+  filter: (w) => w("title").contains("x").and(w("published").eq(true)),
+});
+await postsSvc.getList(1, 20, { filter: (w) => w("tags").anyEq("news") });
+await postsSvc.getFirstListItem((w) => w("author.email").contains("x"));
+// @ts-expect-error callback `where` rejects unknown fields
+await postsSvc.getList(1, 20, { filter: (w) => w("nope").eq("x") });
+// @ts-expect-error callback `where` rejects a dot-path whose first segment is unknown
+await postsSvc.getFullList({ filter: (w) => w("nope.email").contains("x") });
+
 // Filter: every `field op value` clause is validated, not just the first.
 await postsSvc.getList(1, 20, { filter: "title ~ 'a && b' && published = true" }); // quoted && ok
 await postsSvc.getList(1, 20, { filter: "author = 'x' && published = true" });
