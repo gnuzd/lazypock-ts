@@ -352,6 +352,15 @@ per-field type. An empty `in([])` / `notIn([])` throws. A built expression
 can be passed anywhere a `filter` string is accepted — including
 `getFirstListItem(q('slug').eq('hello-world'))`.
 
+For a one-off filter, build inline with a callback — it receives the same
+typed `where` helper, so field names are still suggested and checked:
+
+```typescript
+await postsSvc.getFullList({
+  filter: (w) => w('title').contains('x').and(w('published').eq(true)),
+});
+```
+
 #### Expanding relations
 
 `expand` attaches the related record(s) under `record.expand`; the relation
