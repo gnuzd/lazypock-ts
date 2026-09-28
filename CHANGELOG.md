@@ -25,6 +25,14 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.15.0](https://github.com/gnuzd/lazypock-ts/compare/v0.14.0...v0.15.0) (2026-09-28)
+
+
+### Features
+
+* **filter:** accept a typed where-callback in the filter option ([41b34f6](https://github.com/gnuzd/lazypock-ts/commit/41b34f63aab9cbbdb852c8995446c99258d971ea))
+* **filter:** typed where-callback in the filter option ([c42431f](https://github.com/gnuzd/lazypock-ts/commit/c42431fca29672055133bfaf3a758194124443da))
+
 ## [0.14.0](https://github.com/gnuzd/lazypock-ts/compare/v0.13.0...v0.14.0) (2026-09-27)
 
 
