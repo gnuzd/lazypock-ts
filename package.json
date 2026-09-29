@@ -25,6 +25,7 @@
     "typecheck": "tsc --noEmit",
     "generate": "node dist/cli.js",
     "smoke": "npm run build && node smoke-test.mjs && tsc --noEmit --strict --target es2020 --module esnext --moduleResolution bundler type-test.ts",
+    "bench": "npm run build && node bench/codegen.mjs && node bench/http-overhead.mjs",
     "test:integration": "npm run build && node integration-test.mjs",
     "prepublishOnly": "npm run build"
   },

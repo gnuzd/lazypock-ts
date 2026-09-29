@@ -84,7 +84,7 @@ npx lazypock \
 # writes ./lazypock.types.ts
 ```
 
-> `lazypock-gen` remains as a deprecated alias for backwards compatibility — the canonical command is now simply `lazypock`.
+> `lazypock-gen` remains as a deprecated alias for backwards compatibility — the canonical command is now simply `lazypock`. Invoking the alias (or the deprecated `--api-key` / `--out` flags) prints a deprecation warning to stderr.
 
 **Use an API key instead of a password** (recommended). Generate one from Studio **Settings → API Keys**, then:
 
@@ -165,11 +165,11 @@ lazypock [options]
 Options:
   --url <url>        API base URL (or LAZYPOCK_URL)
   --apikey <key>    API key (or LAZYPOCK_API_KEY) — recommended, no login round-trip
-  --api-key <key>   Deprecated alias for --apikey
+  --api-key <key>   Deprecated alias for --apikey (warns)
   --email <email>    Superuser email (or LAZYPOCK_EMAIL)
   --password <pw>    Superuser password (or LAZYPOCK_PASSWORD)
   --output <file>   Output file (default: lazypock.types.ts)
-  --out <file>      Deprecated alias for --output
+  --out <file>      Deprecated alias for --output (warns)
   --package <name>   Package name to import (default: lazypock)
   --skip-system      Skip system collections
 ```
@@ -407,7 +407,7 @@ The main client class.
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `baseUrl` | `string` | required | API base URL (e.g. `http://localhost:4000/api`) |
-| `storage` | `StorageAdapter` | `memoryStorage` | Custom storage adapter for token persistence |
+| `storage` | `StorageAdapter` | `memoryStorage` | Custom storage adapter for token persistence (`memoryStorage` = `localStorage` with in-memory fallback) |
 | `authStore` | `AuthStore` | auto-created | Explicit auth store instance |
 | `realtime` | `RealtimeService` | auto-created | Real-time service for WebSocket subscriptions |
 
@@ -630,7 +630,9 @@ try {
 
 ### Storage Adapter
 
-By default, the SDK uses `localStorage` for token persistence. You can provide a custom adapter:
+By default the client uses the exported `memoryStorage` adapter, which persists to `localStorage` when it is available and transparently falls back to in-memory storage otherwise (e.g. SSR, private mode, or blocked storage). You can provide a custom adapter:
+
+> **Security:** tokens persisted to `localStorage` are readable by any script on the page, so an XSS bug can exfiltrate them. For high-risk apps, pass a custom in-memory adapter or keep the token in an `httpOnly` cookie managed by your server.
 
 ```typescript
 import { LazypockClient, AuthStore } from 'lazypock';

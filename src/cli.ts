@@ -128,8 +128,33 @@ async function fetchCollections(
 	return (await collRes.json()) as CollectionsResponse;
 }
 
+function warnDeprecations(argv: string[]): void {
+	// NOTE: both `lazypock` and `lazypock-gen` point at this same file, so the
+	// bin name is inferred from the invoked path. This is best-effort: it works
+	// for the npm bin shim / symlink but not if the file is copied under a
+	// different name.
+	const invokedAs = (process.argv[1] ?? "").split(/[\\/]/).pop() ?? "";
+	if (invokedAs.includes("lazypock-gen")) {
+		console.error(
+			"⚠️  `lazypock-gen` is deprecated; use `lazypock` (the canonical command).",
+		);
+	}
+	if (argv.includes("--api-key")) {
+		console.error(
+			"⚠️  `--api-key` is deprecated; use `--apikey` (or LAZYPOCK_API_KEY).",
+		);
+	}
+	if (argv.includes("--out")) {
+		console.error(
+			"⚠️  `--out` is deprecated; use `--output` (or LAZYPOCK_OUT).",
+		);
+	}
+}
+
 async function main(): Promise<void> {
-	const opts = parseArgs(process.argv.slice(2));
+	const argv = process.argv.slice(2);
+	warnDeprecations(argv);
+	const opts = parseArgs(argv);
 	const authLabel = opts.apiKey
 		? `API key ${opts.apiKey.slice(0, 4)}…${opts.apiKey.slice(-4)}`
 		: opts.email;
