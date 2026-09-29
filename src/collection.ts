@@ -1161,6 +1161,113 @@ export class CollectionService<
 		return this.listAuthMethods(options);
 	}
 
+	// ── Email / Verification / Password Reset (PocketBase parity) ──
+
+	/**
+	 * Send a password reset email to the given address (PocketBase
+	 * `requestPasswordReset`). The backend always answers 204 to avoid
+	 * revealing whether the address exists.
+	 */
+	async requestPasswordReset(
+		email: string,
+		options?: RequestOptions,
+	): Promise<boolean> {
+		await this.http.post(
+			"/" + this.encodeId(this.collectionName) + "/request-password-reset",
+			{ email },
+			options,
+		);
+		return true;
+	}
+
+	/**
+	 * Confirm a password reset (PocketBase `confirmPasswordReset`).
+	 *
+	 * @param passwordResetToken The token emailed by `requestPasswordReset`.
+	 * @param password The new password (min 8 chars server-side).
+	 * @param passwordConfirm Must equal `password`.
+	 */
+	async confirmPasswordReset(
+		passwordResetToken: string,
+		password: string,
+		passwordConfirm: string,
+		options?: RequestOptions,
+	): Promise<boolean> {
+		await this.http.post(
+			"/" + this.encodeId(this.collectionName) + "/confirm-password-reset",
+			{ token: passwordResetToken, password, passwordConfirm },
+			options,
+		);
+		return true;
+	}
+
+	/**
+	 * Send a verification email to the given address (PocketBase
+	 * `requestVerification`). The backend always answers 204 to avoid
+	 * revealing whether the address exists.
+	 */
+	async requestVerification(
+		email: string,
+		options?: RequestOptions,
+	): Promise<boolean> {
+		await this.http.post(
+			"/" + this.encodeId(this.collectionName) + "/request-verification",
+			{ email },
+			options,
+		);
+		return true;
+	}
+
+	/**
+	 * Confirm an email verification (PocketBase `confirmVerification`).
+	 * Resolves with the verified auth record.
+	 */
+	async confirmVerification(
+		verificationToken: string,
+		options?: RequestOptions,
+	): Promise<T | null> {
+		const data = await this.http.post<{ record: ApiRecord }>(
+			"/" + this.encodeId(this.collectionName) + "/confirm-verification",
+			{ token: verificationToken },
+			options,
+		);
+		return (data?.record as T | undefined) ?? null;
+	}
+
+	/**
+	 * Send an email-change confirmation email to a new address (PocketBase
+	 * `requestEmailChange`). Requires an authenticated auth-collection user.
+	 */
+	async requestEmailChange(
+		newEmail: string,
+		options?: RequestOptions,
+	): Promise<boolean> {
+		await this.http.post(
+			"/" + this.encodeId(this.collectionName) + "/request-email-change",
+			{ newEmail },
+			options,
+		);
+		return true;
+	}
+
+	/**
+	 * Confirm an email change (PocketBase `confirmEmailChange`). Requires the
+	 * currently authenticated user's password. Resolves with the updated auth
+	 * record.
+	 */
+	async confirmEmailChange(
+		emailChangeToken: string,
+		password: string,
+		options?: RequestOptions,
+	): Promise<T | null> {
+		const data = await this.http.post<{ record: ApiRecord }>(
+			"/" + this.encodeId(this.collectionName) + "/confirm-email-change",
+			{ token: emailChangeToken, password },
+			options,
+		);
+		return (data?.record as T | undefined) ?? null;
+	}
+
 	/**
 	 * Sign in with an OAuth2 provider (PocketBase `authWithOAuth2` parity).
 	 *
