@@ -25,6 +25,19 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.16.0](https://github.com/gnuzd/lazypock-ts/compare/v0.15.0...v0.16.0) (2026-09-29)
+
+
+### Features
+
+* **auth:** add email verification, password reset, and email change methods ([6d84b10](https://github.com/gnuzd/lazypock-ts/commit/6d84b107128d29eb39bd480d3bb4c74317750b59))
+* **auth:** add email verification, password reset, and email change methods ([d93ff82](https://github.com/gnuzd/lazypock-ts/commit/d93ff82e75504e390831b0aeb4d3118a22dad712))
+
+
+### Bug Fixes
+
+* **cli:** warn when using deprecated lazypock-gen bin or flags ([16f9ffc](https://github.com/gnuzd/lazypock-ts/commit/16f9ffcb410ebabba85a7acaa53c30ab385f1e85))
+
 ## [0.15.0](https://github.com/gnuzd/lazypock-ts/compare/v0.14.0...v0.15.0) (2026-09-28)
 
 
