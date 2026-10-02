@@ -25,6 +25,14 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.16.1](https://github.com/gnuzd/lazypock-ts/compare/v0.16.0...v0.16.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **oauth2:** relay the authorization code and forward createData ([1ed93e5](https://github.com/gnuzd/lazypock-ts/commit/1ed93e536b076104287f2a8f41e56af9184f4ec6))
+* **oauth2:** relay the authorization code and forward createData ([bf5e922](https://github.com/gnuzd/lazypock-ts/commit/bf5e9222e0385fdcdc2cfb8e98e5a6662a43ad76))
+
 ## [0.16.0](https://github.com/gnuzd/lazypock-ts/compare/v0.15.0...v0.16.0) (2026-09-29)
 
 
