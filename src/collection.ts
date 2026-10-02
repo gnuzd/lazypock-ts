@@ -1271,14 +1271,13 @@ export class CollectionService<
 	/**
 	 * Sign in with an OAuth2 provider (PocketBase `authWithOAuth2` parity).
 	 *
-	 * One call handles the whole web flow: fetch the provider's `authURL`,
-	 * open a popup (or call `options.urlCallback`), wait for the backend's
-	 * `postMessage` result, populate the auth store, and resolve with
-	 * `{ token, record, meta }`.
+	 * One call handles the whole web flow: fetch the provider's `authURL`, open a
+	 * popup (or call `options.urlCallback`), receive the single-use authorization
+	 * `code` the backend relays via `postMessage`, exchange it, populate the auth
+	 * store, and resolve with `{ token, record, meta }`.
 	 *
-	 * `options.createData` is accepted for PocketBase signature parity but is
-	 * **not** forwarded by the backend's popup redirect flow — use
-	 * {@link authWithOAuth2Code} when you need extra fields on first sign-up.
+	 * `options.createData` is forwarded on first sign-up (the exchange goes
+	 * through {@link authWithOAuth2Code}), matching PocketBase.
 	 *
 	 * React Native / non-browser: the popup flow depends on
 	 * `window.postMessage`. Use {@link listAuthMethods} + {@link authWithOAuth2Code}
@@ -1287,6 +1286,7 @@ export class CollectionService<
 	async authWithOAuth2(options: OAuth2Options): Promise<RecordAuth<T>> {
 		const {
 			provider,
+			createData,
 			urlCallback,
 			popup,
 			timeoutMs = DEFAULT_OAUTH2_TIMEOUT_MS,
@@ -1306,7 +1306,10 @@ export class CollectionService<
 			);
 		}
 
-		const result = await authorizeWithOAuth2Popup({
+		// The redirect page relays only the authorization code (never a token).
+		// Exchange it through the shared code path so `createData` is forwarded
+		// and the auth store is populated in one place.
+		const { code } = await authorizeWithOAuth2Popup({
 			authURL: providerInfo.authURL,
 			expectedOrigin: oauth2RedirectOrigin(this.http.baseUrl),
 			urlCallback,
@@ -1314,16 +1317,12 @@ export class CollectionService<
 			timeoutMs,
 		});
 
-		if (this.authStore) {
-			this.authStore.setCollectionName(this.collectionName);
-			// SAFETY: the server's auth response record is a superset of
-			// AuthModel; the auth store consumes it generically.
-			this.authStore.set(result.token, result.record as unknown as AuthModel);
-		}
-		// SAFETY: `result.record` is the server's auth record for this
-		// collection; it satisfies `T` at runtime — `T` is a compile-time
-		// lens only.
-		return result as unknown as RecordAuth<T>;
+		return this.authWithOAuth2Code({
+			provider,
+			code,
+			codeVerifier: providerInfo.codeVerifier,
+			createData,
+		});
 	}
 
 	/**

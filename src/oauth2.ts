@@ -5,15 +5,19 @@
 //     ready-to-use `authURL` (state + PKCE `codeVerifier` already embedded
 //     and stored server-side, keyed by `state`).
 //   - The provider redirects back to `GET /api/oauth2-redirect`, which
-//     exchanges the code, links/upserts the auth record, and serves a tiny
-//     page that posts the finished `{ token, record, meta }` result back to
-//     the popup opener via `window.postMessage`.
+//     validates + consumes the pending session and serves a tiny page that
+//     relays **only the single-use authorization `code`** to the popup opener
+//     via `window.postMessage`, targeted at the origin captured when the flow
+//     started.
 //
-// This means the SDK never handles `code`/`state`/`codeVerifier` for the
-// popup flow — the backend owns them. The SDK's job is: fetch the provider
-// list, present the `authURL`, and wait for the `postMessage` result (with
-// strict `event.origin` + `event.source` validation), then populate the
-// auth store exactly like every other auth method.
+// The SDK's job is: fetch the provider list, present the `authURL`, wait for
+// the `postMessage` code (with strict `event.origin` + `event.source`
+// validation), then finish by calling `authWithOAuth2Code` — which is where the
+// code is exchanged and the auth store is populated. That keeps the token out
+// of the redirect page and lets `createData` be forwarded on first sign-up.
+//
+// For non-browser / custom-window flows the SDK never touches the browser
+// bridge: use `listAuthMethods()` + `authWithOAuth2Code()` directly.
 
 import { ApiError } from "./types";
 
@@ -78,15 +82,13 @@ export interface OAuth2PopupOptions {
 /**
  * Options for {@link CollectionService.authWithOAuth2} (the popup flow).
  *
- * `createData` is accepted for PocketBase signature parity but is **not**
- * currently forwarded by the backend's popup redirect flow (it signs up
- * with provider-derived fields only). Use {@link OAuth2AuthCodeOptions.createData}
- * via `authWithOAuth2Code` when you need extra fields on first sign-up.
+ * `createData` is forwarded on first sign-up (the popup flow finishes with an
+ * `authWithOAuth2Code` exchange), matching PocketBase.
  */
 export interface OAuth2Options {
 	/** Provider identifier (e.g. `"google"`). */
 	provider: string;
-	/** Extra fields for the auto-created record (see note above). */
+	/** Extra fields merged into the record on first sign-up. */
 	createData?: Record<string, unknown>;
 	/**
 	 * Called with the authorization URL instead of auto-opening a popup.
@@ -125,10 +127,18 @@ export interface OAuth2AuthCodeOptions {
 	createData?: Record<string, unknown>;
 }
 
+/** The single-use authorization code relayed by the backend's redirect page. */
+export interface OAuth2RelayResult {
+	code: string;
+	state?: string;
+}
+
 /** The postMessage payload the backend's redirect page sends. */
 interface OAuth2RedirectMessage {
 	type: "lazypock:oauth2" | "lazypock:oauth2:error";
-	result: RecordAuth | { code?: number; message?: string; data?: unknown };
+	code?: unknown;
+	state?: unknown;
+	message?: unknown;
 }
 
 const DEFAULT_POPUP_WIDTH = 500;
@@ -162,24 +172,15 @@ function isSafeBrowserUrl(url: string): boolean {
 	}
 }
 
-function isRecordAuth(value: unknown): value is RecordAuth {
-	return (
-		!!value &&
-		typeof value === "object" &&
-		typeof (value as RecordAuth).token === "string" &&
-		!!(value as RecordAuth).record &&
-		typeof (value as RecordAuth).record === "object"
-	);
-}
-
 /**
- * Present the OAuth2 authorization URL and resolve with the backend's
- * `{ token, record, meta }` result delivered via `postMessage`.
+ * Present the OAuth2 authorization URL and resolve with the single-use
+ * authorization `code` the backend relays via `postMessage`.
  *
- * This is the shared orchestration behind `authWithOAuth2`: open a popup
- * (or invoke `urlCallback`), wait for the backend's `lazypock:oauth2`
- * message, validate its origin + source, and clean up all timers/listeners
- * on every exit path.
+ * This is the shared orchestration behind `authWithOAuth2`: open a popup (or
+ * invoke `urlCallback`), wait for the backend's `lazypock:oauth2` message,
+ * validate its origin + source, and clean up all timers/listeners on every
+ * exit path. The caller is responsible for exchanging the returned code (see
+ * {@link CollectionService.authWithOAuth2Code}).
  */
 export function authorizeWithOAuth2Popup(opts: {
 	authURL: string;
@@ -187,8 +188,8 @@ export function authorizeWithOAuth2Popup(opts: {
 	urlCallback?: (url: string) => void | Promise<void>;
 	popup?: OAuth2PopupOptions;
 	timeoutMs: number;
-}): Promise<RecordAuth> {
-	return new Promise<RecordAuth>((resolve, reject) => {
+}): Promise<OAuth2RelayResult> {
+	return new Promise<OAuth2RelayResult>((resolve, reject) => {
 		// The popup flow depends on a browser `window` for both presenting the
 		// popup and receiving the `postMessage` result.
 		if (typeof window === "undefined") {
@@ -221,12 +222,12 @@ export function authorizeWithOAuth2Popup(opts: {
 			window.removeEventListener("message", onMessage);
 		};
 
-		const finish = (err: ApiError | null, result?: RecordAuth) => {
+		const finish = (err: ApiError | null, result?: OAuth2RelayResult) => {
 			if (settled) return;
 			settled = true;
 			cleanup();
 			if (err) reject(err);
-			else resolve(result as RecordAuth);
+			else resolve(result as OAuth2RelayResult);
 		};
 
 		const onMessage = (event: MessageEvent) => {
@@ -242,7 +243,8 @@ export function authorizeWithOAuth2Popup(opts: {
 			if (!data || typeof data !== "object") return;
 
 			if (data.type === "lazypock:oauth2") {
-				if (isRecordAuth(data.result)) {
+				const code = data.code;
+				if (typeof code === "string" && code) {
 					if (popup) {
 						try {
 							popup.close();
@@ -250,11 +252,12 @@ export function authorizeWithOAuth2Popup(opts: {
 							// ignore — the backend already closes it
 						}
 					}
-					finish(null, data.result);
+					const state = typeof data.state === "string" ? data.state : undefined;
+					finish(null, { code, state });
 				} else {
 					finish(
 						new ApiError(
-							"OAuth2 callback returned an invalid result.",
+							"OAuth2 callback returned no authorization code.",
 							data,
 							400,
 							false,
@@ -266,23 +269,12 @@ export function authorizeWithOAuth2Popup(opts: {
 			}
 
 			if (data.type === "lazypock:oauth2:error") {
-				const result = (data.result ?? {}) as {
-					code?: number;
-					message?: string;
-					data?: unknown;
-				};
 				const message =
-					typeof result.message === "string" && result.message
-						? result.message
+					typeof data.message === "string" && data.message
+						? data.message
 						: "OAuth2 authorization failed.";
 				finish(
-					new ApiError(
-						message,
-						result,
-						typeof result.code === "number" ? result.code : 400,
-						false,
-						"oauth2_provider_error",
-					),
+					new ApiError(message, data, 400, false, "oauth2_provider_error"),
 				);
 			}
 		};

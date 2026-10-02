@@ -52,13 +52,14 @@ const auth = await client.collection('users').authWithOAuth2({ provider: 'google
 ```
 
 One call handles the whole flow: it fetches the provider's authorization URL,
-opens a popup, waits for the backend's redirect result (delivered via
-`postMessage`), and populates the auth store — the same result shape as
-`authWithPassword`.
+opens a popup, receives the single-use authorization `code` the backend relays
+via `postMessage`, exchanges it, and populates the auth store — the same result
+shape as `authWithPassword`. `createData` is forwarded on first sign-up.
 
 Options:
 
 - `provider` (required) — the provider name, e.g. `'google'`
+- `createData` — extra fields merged into the record on first sign-up
 - `urlCallback(url)` — called with the authorization URL instead of opening a
   popup (the presented window must preserve `window.opener`)
 - `popup: { width, height }` — popup geometry (default 500×700)
@@ -91,10 +92,15 @@ const methods = await client.collection('users').listAuthMethods();
 
 ### Notes
 
-- The provider's `code`/`state`/PKCE `codeVerifier` are handled by the backend —
-  the SDK never touches them in the popup flow.
-- `createData` on `authWithOAuth2` is accepted for PocketBase parity but is not
-  forwarded by the popup redirect flow; use `authWithOAuth2Code` for that.
+- The backend creates the PKCE `state`/`codeVerifier` and validates the pending
+  session on the redirect. The popup page relays **only the single-use
+  authorization `code`** (never a token or user record); the SDK then exchanges
+  it via `authWithOAuth2Code`.
+- The `codeVerifier` returned by `listAuthMethods()` is the PKCE verifier, not a
+  provider secret — `client_secret` never leaves the backend.
+- The popup flow posts the result back to the origin that started it, so it also
+  works when the API and the app are on different origins (as long as the app's
+  origin is in the server's allowed origins / `LAZYPOCK_CORS_ORIGINS`).
 
 ## AuthStore
 
