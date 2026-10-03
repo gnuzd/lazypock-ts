@@ -37,7 +37,9 @@ import {
 	getFileUrl,
 	getThumbUrl,
 	getScaleUrl,
+	getVariantUrl,
 	type FileRecord,
+	type DirectUpload,
 } from "./files";
 import { CollectionsService } from "./collections";
 import type { CollectionSchema, SchemaField } from "./schema";
@@ -76,6 +78,7 @@ export {
 	getFileUrl,
 	getThumbUrl,
 	getScaleUrl,
+	getVariantUrl,
 	CollectionService,
 	CollectionsService,
 	generateTypes,

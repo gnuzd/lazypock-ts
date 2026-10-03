@@ -18,6 +18,7 @@ export {
 	getFileUrl,
 	getThumbUrl,
 	getScaleUrl,
+	getVariantUrl,
 	LazypockClient,
 	CollectionService,
 	CollectionsService,
