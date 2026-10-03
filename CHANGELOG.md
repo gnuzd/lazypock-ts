@@ -25,6 +25,14 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.17.0](https://github.com/gnuzd/lazypock-ts/compare/v0.16.1...v0.17.0) (2026-10-03)
+
+
+### Features
+
+* **files:** preset variant URLs, upload origin/variants and direct upload ([2a26579](https://github.com/gnuzd/lazypock-ts/commit/2a2657961e53001e976b26eaa61b379d7cf90179))
+* **files:** preset variant URLs, upload origin/variants, direct upload ([2b08028](https://github.com/gnuzd/lazypock-ts/commit/2b0802820f12a816024fc818977dacc6bc6e052c))
+
 ## [0.16.1](https://github.com/gnuzd/lazypock-ts/compare/v0.16.0...v0.16.1) (2026-10-02)
 
 
