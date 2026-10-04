@@ -11,6 +11,8 @@ export interface FileRecord {
 	mimeType: string;
 	size: number;
 	url: string;
+	/** ID of the identity that uploaded the file (empty when unknown). */
+	uploadedBy?: string;
 	/** Map of thumbnail size => URL, e.g. { "50x50": "/api/files/<id>/thumbs/50x50" } */
 	thumbs?: Record<string, string>;
 	/** Map of preset name => variant URL, e.g. { "content": "/api/files/<id>/scale/content" } */
