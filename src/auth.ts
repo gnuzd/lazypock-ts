@@ -14,9 +14,17 @@ export interface StorageAdapter {
 	remove(key: string): void | Promise<void>;
 }
 
-/** Shape of an authenticated user record (from auth collections). */
+/**
+ * Shape of an authenticated user record (from auth collections).
+ *
+ * The server returns PocketBase-shaped records, so `collectionName` /
+ * `collectionId` are normally present and let the store recover the auth
+ * collection from a restored session.
+ */
 export interface AuthModel {
 	id: string;
+	collectionName?: string;
+	collectionId?: string;
 	[key: string]: unknown;
 }
 
@@ -79,10 +87,13 @@ export class AuthStore {
 
 	/**
 	 * Set the auth collection name (used internally by auto-refresh).
+	 *
+	 * Persisted, so it survives a reload together with the token and model.
 	 * @param name The collection name, or null for superuser tokens.
 	 */
 	setCollectionName(name: string | null): void {
 		this._collectionName = name;
+		void this.persistCollectionName();
 	}
 
 	/**
@@ -90,10 +101,11 @@ export class AuthStore {
 	 * Should be called once at application startup.
 	 */
 	async init(): Promise<void> {
-		const [token, model, expiresAt] = await Promise.all([
+		const [token, model, expiresAt, collectionName] = await Promise.all([
 			this.storage.get("auth_token"),
 			this.storage.get("auth_model"),
 			this.storage.get("auth_expires_at"),
+			this.storage.get("auth_collection"),
 		]);
 		if (token) this._token = token;
 		if (expiresAt) this._tokenExpiresAt = parseInt(expiresAt, 10) || null;
@@ -103,6 +115,14 @@ export class AuthStore {
 			} catch {
 				// ignore corrupt data
 			}
+		}
+
+		if (collectionName) {
+			this._collectionName = collectionName;
+		} else if (this._model && typeof this._model.collectionName === "string") {
+			// Sessions persisted by older versions (or a caller that only called
+			// `set`) have no `auth_collection` — recover it from the record.
+			this._collectionName = this._model.collectionName;
 		}
 	}
 
@@ -115,18 +135,26 @@ export class AuthStore {
 		this._token = token;
 		this._model = model;
 		this._tokenExpiresAt = Date.now() + TOKEN_TTL_MS;
+
+		// Derive the auth collection from the record when the caller did not set it
+		// explicitly (e.g. a token refresh of a restored session).
+		if (!this._collectionName && model && typeof model.collectionName === "string") {
+			this._collectionName = model.collectionName;
+		}
+
 		void Promise.all([
 			this.storage.set("auth_token", token),
 			this.storage.set("auth_expires_at", String(this._tokenExpiresAt)),
 			model
 				? this.storage.set("auth_model", JSON.stringify(model))
 				: this.storage.remove("auth_model"),
+			this.persistCollectionName(),
 		]);
 		this.notify();
 	}
 
 	/**
-	 * Clear all auth state (token, model, expiry) and notify listeners.
+	 * Clear all auth state (token, model, expiry, collection) and notify listeners.
 	 */
 	clear(): void {
 		this._token = "";
@@ -137,10 +165,16 @@ export class AuthStore {
 			this.storage.remove("auth_token"),
 			this.storage.remove("auth_expires_at"),
 			this.storage.remove("auth_model"),
+			this.storage.remove("auth_collection"),
 		]);
 		this.notify();
 	}
 
+	private persistCollectionName(): Promise<void> | void {
+		return this._collectionName
+			? this.storage.set("auth_collection", this._collectionName)
+			: this.storage.remove("auth_collection");
+	}
 	/**
 	 * Register a listener for auth state changes.
 	 * @param fn Callback invoked with (model, token) on every change.
