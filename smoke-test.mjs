@@ -918,7 +918,7 @@ await (async () => {
 	const c = new LazypockClient({ baseUrl: "http://x/api" });
 
 	// concurrent identical calls → 1 request, both resolve
-	const url = "http://x/api/posts?page=1&perPage=1000";
+	const url = "http://x/api/collections/posts/records?page=1&perPage=1000";
 	const [a, b] = await Promise.allSettled([
 		c.collection("posts").getFullList({ fetch: fetchMock }),
 		c.collection("posts").getFullList({ fetch: fetchMock }),
@@ -976,7 +976,7 @@ await (async () => {
 	const c3 = new LazypockClient({ baseUrl: "http://x/api" });
 	const multi = await c3.collection("multi").getFullList({ fetch: pageFetch });
 	check("getFullList dedup: multi-page returns 4 items", multi?.length, 4);
-	const pageReqs = [...counters.keys()].filter((k) => k.includes("/multi?")).length;
+	const pageReqs = [...counters.keys()].filter((k) => k.includes("multi") && k.includes("page=")).length;
 	check("getFullList dedup: multi-page = 2 page requests", pageReqs, 2);
 })();
 
