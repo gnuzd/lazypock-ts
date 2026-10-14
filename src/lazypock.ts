@@ -357,7 +357,7 @@ export class LazypockClient {
 					string,
 					unknown
 				>
-			>("/" + encodeURIComponent(collection) + "/auth-with-password", {
+			>("/collections/" + encodeURIComponent(collection) + "/auth-with-password", {
 				identity: email,
 				password,
 			});
@@ -429,7 +429,7 @@ export class LazypockClient {
 		const data = await this.http.post<
 			{ token: string; record: ApiRecord } & Record<string, unknown>
 		>(
-			"/" + encodeURIComponent(collection) + "/auth-with-password",
+			"/collections/" + encodeURIComponent(collection) + "/auth-with-password",
 			{ identity, password },
 			options,
 		);
@@ -458,7 +458,7 @@ export class LazypockClient {
 		const data = await this.http.post<
 			{ token: string; record: ApiRecord } & Record<string, unknown>
 		>(
-			"/" + encodeURIComponent(collection) + "/auth-refresh",
+			"/collections/" + encodeURIComponent(collection) + "/auth-refresh",
 			undefined,
 			options,
 		);

@@ -70,7 +70,10 @@ export class HttpClient {
 		if (!collection) return null;
 		try {
 			const url =
-				this.baseUrl + "/" + encodeURIComponent(collection) + "/auth-refresh";
+				this.baseUrl +
+				"/collections/" +
+				encodeURIComponent(collection) +
+				"/auth-refresh";
 			const headers: Record<string, string> = {
 				"Content-Type": "application/json",
 			};
