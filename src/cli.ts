@@ -92,7 +92,7 @@ async function fetchCollections(
 		// Step 1: login as superuser to get a token.
 		// Prefer the PocketBase-parity `_superusers` auth collection endpoint,
 		// fall back to the legacy /superusers/login for older servers.
-		let loginRes = await fetch(base + "/_superusers/auth-with-password", {
+		let loginRes = await fetch(base + "/collections/_superusers/auth-with-password", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ identity: opts.email, password: opts.password }),

@@ -373,7 +373,7 @@ export class LazypockClient {
 			try {
 				data = await this.http.post<
 					{ token: string; record: ApiRecord } & Record<string, unknown>
-				>("/_superusers/auth-with-password", {
+				>("/collections/_superusers/auth-with-password", {
 					identity: email,
 					password,
 				});

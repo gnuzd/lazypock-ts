@@ -227,6 +227,21 @@ export class CollectionService<
 		return encodeURIComponent(id);
 	}
 
+	/**
+	 * The records endpoint for this collection.
+	 *
+	 * Centralised because the server's shape is `/api/collections/<name>/records`,
+	 * and a path repeated eighteen times is a path that drifts.
+	 */
+	private recordsPath(): string {
+		return "/collections/" + this.encodeId(this.collectionName) + "/records";
+	}
+
+	/** The collection's own endpoint, which is where its auth routes live. */
+	private collectionPath(): string {
+		return "/collections/" + this.encodeId(this.collectionName);
+	}
+
 	// ── Field projection (`.select`) ──
 
 	/**
@@ -735,7 +750,7 @@ export class CollectionService<
 		).toString();
 		const result = await this.http.get<
 			ListResult<T2 & { expand?: ExpandObj<E, TExpand> }>
-		>("/" + this.encodeId(this.collectionName) + "?" + qs, {
+		>(this.recordsPath() + "?" + qs, {
 			requestKey,
 			autoCancel,
 			cancelKey,
@@ -856,10 +871,7 @@ export class CollectionService<
 		}
 		const qsStr = qs.toString();
 		const record = await this.http.get<T & { expand?: ExpandObj<E, TExpand> }>(
-			"/" +
-				this.encodeId(this.collectionName) +
-				"/" +
-				this.encodeId(id) +
+			this.recordsPath() + "/" + this.encodeId(id) +
 				(qsStr ? "?" + qsStr : ""),
 			options,
 		);
@@ -884,7 +896,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<T | null> {
 		return this.http.post<T>(
-			"/" + this.encodeId(this.collectionName),
+			this.recordsPath(),
 			data,
 			options,
 		);
@@ -907,7 +919,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<T | null> {
 		return this.http.patch<T>(
-			"/" + this.encodeId(this.collectionName) + "/" + this.encodeId(id),
+			this.recordsPath() + "/" + this.encodeId(id),
 			data,
 			options,
 		);
@@ -920,7 +932,7 @@ export class CollectionService<
 	 */
 	delete(id: string, options?: RequestOptions): Promise<null> {
 		return this.http.delete(
-			"/" + this.encodeId(this.collectionName) + "/" + this.encodeId(id),
+			this.recordsPath() + "/" + this.encodeId(id),
 			options,
 		);
 	}
@@ -1101,7 +1113,7 @@ export class CollectionService<
 		const data = await this.http.post<
 			{ token: string; record: ApiRecord } & Record<string, unknown>
 		>(
-			"/" + this.encodeId(this.collectionName) + "/auth-with-password",
+			this.collectionPath() + "/auth-with-password",
 			{ identity, password },
 			options,
 		);
@@ -1126,7 +1138,7 @@ export class CollectionService<
 		const data = await this.http.post<
 			{ token: string; record: ApiRecord } & Record<string, unknown>
 		>(
-			"/" + this.encodeId(this.collectionName) + "/auth-refresh",
+			this.collectionPath() + "/auth-refresh",
 			undefined,
 			options,
 		);
@@ -1148,7 +1160,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<AuthMethodsList | null> {
 		return this.http.get<AuthMethodsList>(
-			"/" + this.encodeId(this.collectionName) + "/auth-methods",
+			this.collectionPath() + "/auth-methods",
 			options,
 		);
 	}
@@ -1173,7 +1185,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<boolean> {
 		await this.http.post(
-			"/" + this.encodeId(this.collectionName) + "/request-password-reset",
+			this.collectionPath() + "/request-password-reset",
 			{ email },
 			options,
 		);
@@ -1194,7 +1206,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<boolean> {
 		await this.http.post(
-			"/" + this.encodeId(this.collectionName) + "/confirm-password-reset",
+			this.collectionPath() + "/confirm-password-reset",
 			{ token: passwordResetToken, password, passwordConfirm },
 			options,
 		);
@@ -1211,7 +1223,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<boolean> {
 		await this.http.post(
-			"/" + this.encodeId(this.collectionName) + "/request-verification",
+			this.collectionPath() + "/request-verification",
 			{ email },
 			options,
 		);
@@ -1227,7 +1239,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<T | null> {
 		const data = await this.http.post<{ record: ApiRecord }>(
-			"/" + this.encodeId(this.collectionName) + "/confirm-verification",
+			this.collectionPath() + "/confirm-verification",
 			{ token: verificationToken },
 			options,
 		);
@@ -1243,7 +1255,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<boolean> {
 		await this.http.post(
-			"/" + this.encodeId(this.collectionName) + "/request-email-change",
+			this.collectionPath() + "/request-email-change",
 			{ newEmail },
 			options,
 		);
@@ -1261,7 +1273,7 @@ export class CollectionService<
 		options?: RequestOptions,
 	): Promise<T | null> {
 		const data = await this.http.post<{ record: ApiRecord }>(
-			"/" + this.encodeId(this.collectionName) + "/confirm-email-change",
+			this.collectionPath() + "/confirm-email-change",
 			{ token: emailChangeToken, password },
 			options,
 		);
@@ -1340,7 +1352,7 @@ export class CollectionService<
 		const { provider, code, codeVerifier, redirectUrl, createData } = options;
 
 		const data = await this.http.post<RecordAuth<ApiRecord>>(
-			"/" + this.encodeId(this.collectionName) + "/auth-with-oauth2",
+			this.collectionPath() + "/auth-with-oauth2",
 			{
 				provider,
 				code,
