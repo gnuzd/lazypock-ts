@@ -516,8 +516,16 @@ globalThis.WebSocket = class {
 
 	check(
 		"getScaleUrl builds a scale URL",
-		getScaleUrl("/api", "abc-123", "100x100"),
-		"/api/files/abc-123/scale/100x100",
+		getScaleUrl("/api", "posts/p1/abc-123.png", "100x100"),
+		"/api/files/posts/p1/abc-123.png?thumb=100x100",
+	);
+
+	// A preset name is looked up rather than turned into a box, and a storage key
+	// keeps its separators while each segment is encoded.
+	check(
+		"getScaleUrl passes a preset name through",
+		getScaleUrl("/api", "posts/p1/a b.png", "md"),
+		"/api/files/posts/p1/a%20b.png?preset=md",
 	);
 
 	// ── PocketBase-style subscribe arg forms ──
