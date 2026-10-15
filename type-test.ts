@@ -12,6 +12,7 @@ import {
 	type CollectionService,
 	type AuthMethodsList,
 	type OAuth2Meta,
+	type ListOptions,
 } from "./src/index";
 
 // A hand-rolled collections map (simulating codegen output)
@@ -234,6 +235,30 @@ await base.collection("posts").getList(1, 20, {
 	sort: "-anything",
 	expand: "whatever",
 });
+
+// Regression: the validated string guards must degrade to `string`, not
+// collapse to `never`, when no allowed-set literal was inferred. An
+// explicitly-annotated options bag uses the default generics, and a
+// `string`-typed (non-literal) value carries no allowed set either; both are
+// exactly what the Studio hit against `CollectionService<unknown>`.
+const annotatedOptions: ListOptions = {
+	filter: "anything = 'x'",
+	sort: "-anything",
+	expand: "whatever",
+};
+await base.collection("posts").getList(1, 20, annotatedOptions);
+const dynamicExpand: string = "author";
+const dynamicSort: string = "-created";
+const dynamicFilter: string = "title ~ 'x'";
+await base.collection("posts").getList(1, 20, {
+	expand: dynamicExpand,
+	sort: dynamicSort,
+	filter: dynamicFilter,
+});
+// A plain string is still rejected for a *typed* service: there the allowed
+// set is known, so falling back to `string` would erase the field checks.
+// @ts-expect-error a dynamic string cannot be validated against a concrete T
+await postsSvc.getList(1, 20, { expand: dynamicExpand });
 
 // ── 6b. expanded records carry an `expand` property ──
 // Records fetched with expand expose the expanded relation data under an
