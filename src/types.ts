@@ -147,13 +147,14 @@ export class ApiError extends Error {
 // (TS2456), so an arbitrary-length comma-separated list can't be expressed
 // as a recursive pattern like `Field | \`${Field},${Field},...\``. Instead
 // each option carries a generic `E`/`S`/`F` inferred from the caller's
-// literal, and a *guard* `X & (X extends ValidX<T, X> ? X : never)` validates
-// every token by splitting the literal on commas / clauses with a
-// shrinking-string recursion (the same shape that makes `StringToUnion`
-// legal). The guard is an intersection with the naked `X` so inference still
-// sees the literal; parse failures yield `never`, which is rejected by the
-// literal-vs-never checks below (`never` satisfies `extends ""`, so the
-// checks compare the *literal* against the parse result instead).
+// literal, and a *guard* validates every token by splitting the literal on
+// commas / clauses with a shrinking-string recursion (the same shape that
+// makes `StringToUnion` legal). The guard is `[X] extends [never] ? string :
+// X & (X extends ValidX<T, X> ? X : never)`: when no allowed-set literal was
+// inferred (the untyped default), it degrades to `string` rather than
+// collapsing to `never`; otherwise the intersection with the naked `X`
+// preserves the literal so inference still sees it, and parse failures yield
+// `never`.
 
 /**
  * String keys of a record shape (excludes methods/symbols).
@@ -290,7 +291,9 @@ type ValidExpand<T, E extends string, O extends string = E> =
  * Non-relation fields are warned about at runtime when a schema is
  * available.
  */
-export type ExpandString<T, E extends string = never> = E & (E extends ValidExpand<T, E, E> ? E : never);
+export type ExpandString<T, E extends string = never> = [E] extends [never]
+	? string
+	: E & (E extends ValidExpand<T, E, E> ? E : never);
 
 // ── sort ───────────────────────────────────────────────
 
@@ -317,7 +320,9 @@ type ValidSort<T, E extends string, O extends string = E> =
  * comma-separated combinations (e.g. `"-created,title"`). **Every** token is
  * validated — `sort: "title, nope"` is a compile error.
  */
-export type SortString<T, E extends string = never> = E & (E extends ValidSort<T, E, E> ? E : never);
+export type SortString<T, E extends string = never> = [E] extends [never]
+	? string
+	: E & (E extends ValidSort<T, E, E> ? E : never);
 
 // ── filter ─────────────────────────────────────────────
 
@@ -450,8 +455,9 @@ type ValidFilter<T, F extends string, O extends string = F> =
  * `filter: \`title=${search}\``), the guard falls back to accepting it
  * verbatim — the server decides at runtime.
  */
-export type FilterString<T, F extends string = never> =
-	F & (F extends ValidFilter<T, F, F> ? F : string extends F ? F : never);
+export type FilterString<T, F extends string = never> = [F] extends [never]
+	? string
+	: F & (F extends ValidFilter<T, F, F> ? F : string extends F ? F : never);
 
 // ── expanded records ───────────────────────────────────
 
@@ -512,9 +518,11 @@ export type FilterInput<TFields, F extends string = never> =
 
 /**
  * `_T` is kept for backward compatibility (`ListOptions<Post>`) but the
- * per-field validation now runs through the `E`/`S`/`F` generics.
+ * per-field validation now runs through the `E`/`S`/`F` generics. The default
+ * is `unknown` — the same shape an untyped `CollectionService<unknown>`
+ * carries — so the options bag lines up with what `getList` accepts.
  */
-export interface ListOptions<_T = ApiRecord, E extends string = never, S extends string = never, F extends string = never> {
+export interface ListOptions<_T = unknown, E extends string = never, S extends string = never, F extends string = never> {
 	/**
 	 * PocketBase filter expression. Accepts a raw filter string (field names
 	 * + operators type-checked when `T` is concrete), a pre-built
@@ -548,7 +556,7 @@ export interface ListOptions<_T = ApiRecord, E extends string = never, S extends
 /**
  * Options for single-record reads (`getOne`): expand + explicit fields.
  */
-export interface ReadOptions<_T = ApiRecord, E extends string = never> {
+export interface ReadOptions<_T = unknown, E extends string = never> {
 	/** Relation field(s) to expand — a comma-separated string or a
 	 * field-checked array. */
 	expand?: ExpandString<_T, E> | ExpandField<_T>[];
