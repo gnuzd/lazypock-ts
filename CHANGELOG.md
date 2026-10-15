@@ -25,6 +25,23 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.19.0](https://github.com/gnuzd/lazypock-ts/compare/v0.18.0...v0.19.0) (2026-10-15)
+
+
+### Features
+
+* **files:** address an object by its key, not an opaque id ([a6e77f9](https://github.com/gnuzd/lazypock-ts/commit/a6e77f9f42483ea119979894a4553199d11446df))
+* point the SDK at the Rust server's routes ([4f154c7](https://github.com/gnuzd/lazypock-ts/commit/4f154c7994544bcdcb5e1ff7b76ff56d08267212))
+* port the realtime client from Phoenix WebSocket to the server's SSE endpoint ([8e1f1c3](https://github.com/gnuzd/lazypock-ts/commit/8e1f1c3f659c8270ef485e8e6b591ce6cc45578a))
+* SSE realtime client (replace Phoenix WebSocket) ([8cfc35f](https://github.com/gnuzd/lazypock-ts/commit/8cfc35fea8bd5c3930936feeed5873722408b1e2))
+
+
+### Bug Fixes
+
+* prefix the auth paths built from a parameter, not a literal ([75fe887](https://github.com/gnuzd/lazypock-ts/commit/75fe8874c451b41fd982a4140309f5f511fb33c3))
+* **types:** stop the query guards collapsing to never ([939efcd](https://github.com/gnuzd/lazypock-ts/commit/939efcdd5bd7502f60d8c01ddebdbd06b935a4a5))
+* **types:** stop the query guards collapsing to never ([d087c15](https://github.com/gnuzd/lazypock-ts/commit/d087c15f82114ba32b5ebbeca0ba680d4b06ac6a))
+
 ## [0.18.0](https://github.com/gnuzd/lazypock-ts/compare/v0.17.1...v0.18.0) (2026-10-04)
 
 
