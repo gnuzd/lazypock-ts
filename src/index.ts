@@ -13,7 +13,7 @@ export {
 	ApiError,
 	HttpClient,
 	RealtimeService,
-	wsUrlFromBaseUrl,
+	sseUrlFromBaseUrl,
 	FilesService,
 	getFileUrl,
 	getThumbUrl,
