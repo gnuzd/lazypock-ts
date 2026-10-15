@@ -30,7 +30,7 @@ import {
 	type FilterInput,
 	type FilterWhere,
 } from "./types";
-import { RealtimeService, wsUrlFromBaseUrl } from "./realtime";
+import { RealtimeService, sseUrlFromBaseUrl } from "./realtime";
 import type { RealtimeConnectOpts, RealtimeTokenProvider } from "./realtime";
 import {
 	FilesService,
@@ -73,7 +73,7 @@ export {
 	ApiError,
 	HttpClient,
 	RealtimeService,
-	wsUrlFromBaseUrl,
+	sseUrlFromBaseUrl,
 	FilesService,
 	getFileUrl,
 	getThumbUrl,
@@ -194,7 +194,7 @@ export class LazypockClient {
 		this.realtime = options.realtime ?? new RealtimeService();
 		// Cache the socket URL so collection-level subscribe() can auto-connect.
 		if (!options.realtime) {
-			this.realtime.setUrl(wsUrlFromBaseUrl(baseUrl));
+			this.realtime.setUrl(sseUrlFromBaseUrl(baseUrl));
 		}
 		this.realtime.setConnectionId(connectionId);
 		// Keep the realtime socket authenticated with the current auth token
@@ -357,7 +357,7 @@ export class LazypockClient {
 					string,
 					unknown
 				>
-			>("/" + encodeURIComponent(collection) + "/auth-with-password", {
+			>("/collections/" + encodeURIComponent(collection) + "/auth-with-password", {
 				identity: email,
 				password,
 			});
@@ -373,7 +373,7 @@ export class LazypockClient {
 			try {
 				data = await this.http.post<
 					{ token: string; record: ApiRecord } & Record<string, unknown>
-				>("/_superusers/auth-with-password", {
+				>("/collections/_superusers/auth-with-password", {
 					identity: email,
 					password,
 				});
@@ -429,7 +429,7 @@ export class LazypockClient {
 		const data = await this.http.post<
 			{ token: string; record: ApiRecord } & Record<string, unknown>
 		>(
-			"/" + encodeURIComponent(collection) + "/auth-with-password",
+			"/collections/" + encodeURIComponent(collection) + "/auth-with-password",
 			{ identity, password },
 			options,
 		);
@@ -458,7 +458,7 @@ export class LazypockClient {
 		const data = await this.http.post<
 			{ token: string; record: ApiRecord } & Record<string, unknown>
 		>(
-			"/" + encodeURIComponent(collection) + "/auth-refresh",
+			"/collections/" + encodeURIComponent(collection) + "/auth-refresh",
 			undefined,
 			options,
 		);

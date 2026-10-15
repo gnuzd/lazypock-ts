@@ -29,7 +29,7 @@ const first = (value) => (Array.isArray(value) ? value[0] : value);
 
 async function getToken() {
 	if (envToken) return envToken;
-	const res = await fetch(`${url}/_superusers/auth-with-password`, {
+	const res = await fetch(`${url}/collections/_superusers/auth-with-password`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ identity: email, password }),

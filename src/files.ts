@@ -30,42 +30,49 @@ export interface DirectUpload {
 }
 
 /**
- * Construct a file URL from the API base URL and file ID.
- */
-export function getFileUrl(baseUrl: string, fileId: string): string {
-	return baseUrl.replace(/\/+$/, "") + "/files/" + encodeURIComponent(fileId);
-}
-
-/**
- * Construct a thumbnail URL from the API base URL, file ID, and thumb size.
- * @param size e.g. "50x50"
- */
-export function getThumbUrl(baseUrl: string, fileId: string, size: string): string {
-	return (
-		baseUrl.replace(/\/+$/, "") +
-		"/files/" +
-		encodeURIComponent(fileId) +
-		"/thumbs/" +
-		encodeURIComponent(size)
-	);
-}
-
-/**
- * Construct an on-demand scaled image URL from the API base URL, file ID, and size.
+ * Percent-encode a storage key, keeping its separators.
  *
- * The size is an ImageMagick geometry: "100" (width, keep aspect), "100x100"
- * (fit within box), "100x100!" (exact crop), "x200" (height). The server
- * generates and caches the scaled image on first request.
- * @param size e.g. "100x100"
+ * A key is `collection/record/filename`, so the slashes are structure and must
+ * survive, while each segment is encoded on its own.
  */
-export function getScaleUrl(baseUrl: string, fileId: string, size: string): string {
-	return (
-		baseUrl.replace(/\/+$/, "") +
-		"/files/" +
-		encodeURIComponent(fileId) +
-		"/scale/" +
-		encodeURIComponent(size)
-	);
+function encodeKey(key: string): string {
+	return key.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
+ * Construct a file URL from the API base URL and a storage **key**.
+ *
+ * The key is `collection/record/filename` — for example
+ * `posts/p1/abc123_photo.png` — which is what `GET /api/files` returns as `key`.
+ * The server addresses an object by its key rather than by an opaque id, since
+ * in this design an object *is* its key.
+ *
+ * Prefer the `url` the listing already provides; build one only when all you hold
+ * is a key.
+ */
+export function getFileUrl(baseUrl: string, key: string): string {
+	return baseUrl.replace(/\/+$/, "") + "/files/" + encodeKey(key);
+}
+
+/**
+ * Construct a thumbnail URL for a storage key.
+ *
+ * @param size A box like `200x200`, or a preset name from the server's list.
+ */
+export function getThumbUrl(baseUrl: string, key: string, size: string): string {
+	return getFileUrl(baseUrl, key) + "?thumb=" + encodeURIComponent(size);
+}
+
+/**
+ * Construct a scaled image URL for a storage key.
+ *
+ * @param size A preset name (`md`), or a box (`400x300`) for an ad-hoc size.
+ */
+export function getScaleUrl(baseUrl: string, key: string, size: string): string {
+	// A preset name is looked up on the server; a `WxH` box is generated on
+	// demand. Both end up as a cached variant of the same object.
+	const parameter = size.includes("x") ? "thumb" : "preset";
+	return getFileUrl(baseUrl, key) + "?" + parameter + "=" + encodeURIComponent(size);
 }
 
 /**

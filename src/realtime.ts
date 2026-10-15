@@ -1,11 +1,12 @@
-// ── Phoenix Channel WebSocket Client ──────────────────
+// ── SSE Realtime Client ───────────────────────────────
 //
-// Implements the Phoenix Channels protocol over WebSocket
-// to subscribe to collection realtime updates.
+// Subscribes to this server's Server-Sent Events endpoint at `/api/realtime`.
 //
-// Protocol: Phoenix V1 JSON Serializer (object-based messages).
-// Sends messages as JSON objects with {topic, event, payload, ref, join_ref}.
-// Receives messages as JSON objects with {topic, event, payload, ref}.
+// One connection carries every topic the client is subscribed to: the server takes
+// a comma-separated `subscribe` query parameter and cannot change it on a live
+// connection, so changing the subscription set reconnects. The stream is read with
+// `fetch` rather than `EventSource` so the bearer token and the `X-Connection-Id`
+// header can be sent — `EventSource` supports neither.
 
 interface RealtimeEvent {
 	event: string;
@@ -16,171 +17,160 @@ interface RealtimeEvent {
 interface SubEntry {
 	topic: string;
 	callback: (e: RealtimeEvent) => void;
-	/** Optional payload forwarded with the channel join (e.g. expand). */
+	/** Accepted for API compatibility; SSE has no join payload. */
 	joinPayload?: Record<string, unknown>;
 }
 
 export type RealtimeConnectOpts = {
-	/** WebSocket URL (e.g. ws://localhost:4000/socket/websocket) */
+	/** SSE endpoint URL, e.g. `http://localhost:4000/api/realtime`. */
 	url: string;
-	/** Auth token to pass as query param */
+	/** Auth token to send as a bearer. */
 	token?: string;
 };
 
 /**
  * Provides the current auth token at connect/reconnect time.
- * Wired by {@link LazypockClient} from its `authStore` so the socket is
+ * Wired by {@link LazypockClient} from its `authStore` so the stream is
  * always authenticated with the latest token (PocketBase parity).
  */
 export type RealtimeTokenProvider = () => string | undefined;
 
 /**
- * Derive a WebSocket URL from an HTTP base URL.
- * http://localhost:4000/api → ws://localhost:4000/socket/websocket
+ * Derive the SSE endpoint from an HTTP base URL.
+ * `http://localhost:4000/api` → `http://localhost:4000/api/realtime`
  */
-export function wsUrlFromBaseUrl(baseUrl: string): string {
-	try {
-		const url = new URL(baseUrl);
-		const protocol = url.protocol === "https:" ? "wss:" : "ws:";
-		return `${protocol}//${url.host}/socket/websocket`;
-	} catch {
-		return `${baseUrl.replace(/^http/, "ws").replace(/\/api$/, "")}/socket/websocket`;
-	}
+export function sseUrlFromBaseUrl(baseUrl: string): string {
+	return `${baseUrl.replace(/\/+$/, "")}/realtime`;
 }
 
 /**
- * Phoenix Channel client for real-time collection subscriptions.
+ * @deprecated Realtime is SSE, not WebSocket. Use {@link sseUrlFromBaseUrl}.
+ * Kept so an existing import keeps compiling.
+ */
+export function wsUrlFromBaseUrl(baseUrl: string): string {
+	return sseUrlFromBaseUrl(baseUrl);
+}
+
+/**
+ * Translate an SDK topic to the server's `subscribe` specifier.
  *
- * Connects via WebSocket and subscribes to collection topics.
- * Includes automatic reconnection with exponential backoff.
+ * The SDK keeps PocketBase's topic names (`collection:posts`, `collections`); the
+ * server takes a collection name, an optional `/recordId`, and the registry topic.
+ */
+function serverTopic(topic: string): string | null {
+	if (topic === "collections") return "collections";
+	if (!topic.startsWith("collection:")) return null;
+	const rest = topic.slice("collection:".length);
+	const [name, recordId] = rest.split(":");
+	if (!name) return null;
+	return recordId ? `${name}/${recordId}` : name;
+}
+
+/** The data of one server realtime event. */
+interface RealtimeFrame {
+	collection?: string;
+	action?: string;
+	id?: string;
+	record?: Record<string, unknown>;
+}
+
+/**
+ * SSE client for real-time collection subscriptions.
  *
- * @example
- * ```ts
- * const rt = new RealtimeService();
- * rt.connect({ url: wsUrlFromBaseUrl('http://localhost:4000/api') });
- * rt.subscribe('collection:posts', (e) => console.log(e));
- * ```
+ * Connects to `/api/realtime`, subscribes to the collection topics the SDK uses,
+ * and reconnects with exponential backoff. Live row-level security is applied by the
+ * server: an event is only sent for a record the subscriber may read.
  */
 export class RealtimeService {
-	private ws: WebSocket | null = null;
-	private refCounter = 0;
+	private controller: AbortController | null = null;
+	private open = false;
+	private closed = false;
 	private subscriptions = new Map<string, SubEntry[]>();
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private resubscribeTimer: ReturnType<typeof setTimeout> | null = null;
 	private reconnectAttempt = 0;
 	private maxReconnectDelay = 5000;
 
-	// Callbacks for connection state
+	// Callbacks for connection state.
 	onReconnect?: () => void;
 	onDisconnect?: () => void;
-	onError?: (err: Event) => void;
+	onError?: (err: unknown) => void;
 
-	private url: string = "";
+	private url = "";
 	private token: string | undefined;
 	private tokenProvider: RealtimeTokenProvider | null = null;
 
 	// Per-client connection id (browser tab / device). Sent as the
-	// `connectionId` socket query param so the server can exclude the
-	// *originating* connection from its own realtime broadcasts, while the
-	// same user's other tabs/devices still receive them.
+	// `X-Connection-Id` header so the server can exclude the *originating*
+	// connection from its own broadcasts, while the same user's other
+	// tabs/devices still receive them.
 	private connectionId: string | undefined;
 
-	/** Whether the WebSocket is currently open. */
+	/** Whether the stream is currently open. */
 	get isOpen(): boolean {
-		return this.ws?.readyState === WebSocket.OPEN;
+		return this.open;
 	}
 
-	/**
-	 * The most recently used WebSocket URL (set on {@link connect}).
-	 * Useful for SDK convenience methods that auto-connect before subscribing.
-	 */
+	/** The most recently used SSE URL (set on {@link connect}/{@link setUrl}). */
 	get lastUrl(): string {
 		return this.url;
 	}
 
-	/** The auth token configured for this connection (set on connect). */
+	/** The auth token configured for this connection. */
 	get lastToken(): string | undefined {
 		return this.token;
 	}
 
-	/**
-	 * Set the per-client connection id (browser tab / device). The SDK
-	 * appends it as the `connectionId` socket query param at connect time
-	 * (unless the URL already carries one), matching the `X-Connection-Id`
-	 * header the HTTP client sends — together they let the server exclude
-	 * the originating connection from its own realtime broadcasts.
-	 */
+	/** Set the per-client connection id (browser tab / device). */
 	setConnectionId(id: string): void {
 		this.connectionId = id;
 	}
 
-	/**
-	 * Set the socket URL. Useful before subscribing so the SDK can
-	 * auto-connect on the first {@link subscribe}.
-	 */
+	/** Set the stream URL. Useful before subscribing so the SDK auto-connects. */
 	setUrl(url: string): void {
 		this.url = url;
 	}
 
-	/**
-	 * Register a token provider consulted at every (re)connect.
-	 * When set, it takes precedence over the token passed to {@link connect}.
-	 */
+	/** Register a token provider consulted at every (re)connect. */
 	setTokenProvider(provider: RealtimeTokenProvider): void {
 		this.tokenProvider = provider;
 	}
 
 	/**
-	 * Reconnect the socket immediately with the current token.
-	 * Called by the SDK when auth changes (login/logout/token refresh) so
-	 * private-channel joins are authorized with the new credentials. No-op
-	 * when the socket has never been opened and nothing is subscribed.
+	 * Reconnect immediately with the current token, so auth changes
+	 * (login/logout/refresh) re-authorize private subscriptions.
 	 */
 	refresh(): void {
-		if (typeof WebSocket === "undefined") return;
-		if (!this.ws && this.subscriptions.size === 0) return;
-		this.clearReconnectTimer();
-		const ws = this.ws;
-		this.ws = null;
-		if (ws) {
-			// Suppress the auto-reconnect path for this intentional close.
-			ws.onclose = null;
-			ws.close();
-		}
+		if (this.closed) return;
+		if (!this.open && this.subscriptions.size === 0) return;
 		this.reconnectAttempt = 0;
 		this.doConnect();
 	}
 
-	/*
-	 * Ensure the socket is connected, then subscribe.
-	 * Used by collection-level convenience wrappers so a connection is opened
-	 * automatically on the first subscribe (matching PocketBase behaviour —
-	 * works for anonymous/public collections too).
-	 */
+	/** Ensure a connection is open, then subscribe. */
 	ensureConnected(): void {
-		if (this.isOpen || !this.url) return;
-		if (typeof WebSocket === "undefined") return;
+		if (this.open || this.controller || !this.url) return;
+		if (this.serverTopics().length === 0) return;
 		this.doConnect();
 	}
 
 	connect(opts: RealtimeConnectOpts): void {
 		this.url = opts.url;
 		this.token = opts.token;
+		this.closed = false;
 		this.reconnectAttempt = 0;
 		this.doConnect();
 	}
 
 	disconnect(): void {
+		this.closed = true;
 		this.clearReconnectTimer();
-		this.ws?.close();
-		this.ws = null;
+		this.closeStream();
 	}
 
 	/**
-	 * Subscribe to a topic (e.g. "collection:posts" or "custom:chat-room").
-	 * The backend Channel authorizes via listRule on join.
-	 *
-	 * @param joinPayload Optional payload forwarded with the channel join
-	 * (available to the server's join callback / hooks, e.g. `expand`).
+	 * Subscribe to a topic (`collection:posts`, `collection:posts:ID`, or the
+	 * registry topic `collections`).
 	 */
 	subscribe(
 		topic: string,
@@ -190,189 +180,186 @@ export class RealtimeService {
 		const subs = this.subscriptions.get(topic) || [];
 		subs.push({ topic, callback, joinPayload });
 		this.subscriptions.set(topic, subs);
-
-		if (this.ws?.readyState === WebSocket.OPEN) {
-			this.joinTopic(topic, joinPayload);
-		}
+		this.resubscribe();
 	}
 
-	/**
-	 * Remove all subscriptions for topics under `prefix` (the topic itself or
-	 * any topic starting with `prefix + ":"`). Used by collection-level
-	 * `unsubscribe()` to drop every subscription of a collection.
-	 */
+	/** Remove every subscription under `prefix` (the topic or `prefix:...`). */
 	unsubscribeByPrefix(prefix: string): void {
+		let changed = false;
 		for (const topic of [...this.subscriptions.keys()]) {
 			if (topic === prefix || topic.startsWith(prefix + ":")) {
 				this.subscriptions.delete(topic);
+				changed = true;
 			}
 		}
+		if (changed) this.resubscribe();
+	}
+
+	/** Remove a specific callback from a topic, or the whole topic. */
+	unsubscribe(topic: string, callback?: (e: RealtimeEvent) => void): void {
+		if (!callback) {
+			if (this.subscriptions.delete(topic)) this.resubscribe();
+			return;
+		}
+		const subs = this.subscriptions.get(topic)?.filter((s) => s.callback !== callback);
+		if (subs && subs.length > 0) {
+			this.subscriptions.set(topic, subs);
+			return;
+		}
+		this.subscriptions.delete(topic);
+		this.resubscribe();
+	}
+
+	// ── Internals ────────────────────────────────────
+
+	/** The distinct server topics the current subscriptions need. */
+	private serverTopics(): string[] {
+		const topics = new Set<string>();
+		for (const topic of this.subscriptions.keys()) {
+			const server = serverTopic(topic);
+			if (server) topics.add(server);
+		}
+		return [...topics];
 	}
 
 	/**
-	 * Unsubscribe a specific callback from a topic.
+	 * The subscription set is part of the connection URL, so a change needs a new
+	 * connection. Coalesced, because mounting a page subscribes to several
+	 * collections in one tick.
 	 */
-	unsubscribe(topic: string, callback?: (e: RealtimeEvent) => void): void {
-		if (!callback) {
-			this.subscriptions.delete(topic);
-			return;
-		}
-		const subs = this.subscriptions
-			.get(topic)
-			?.filter((s) => s.callback !== callback);
-		if (subs && subs.length > 0) {
-			this.subscriptions.set(topic, subs);
-		} else {
-			this.subscriptions.delete(topic);
-		}
-	}
-
-	private resubscribeAll(): void {
-		const seen = new Set<string>();
-		for (const entries of this.subscriptions.values()) {
-			for (const entry of entries) {
-				if (seen.has(entry.topic)) continue;
-				seen.add(entry.topic);
-				if (this.ws?.readyState === WebSocket.OPEN) {
-					this.joinTopic(entry.topic, entry.joinPayload);
-				}
+	private resubscribe(): void {
+		if (this.resubscribeTimer) clearTimeout(this.resubscribeTimer);
+		this.resubscribeTimer = setTimeout(() => {
+			this.resubscribeTimer = null;
+			if (this.controller) {
+				this.doConnect();
+			} else {
+				this.ensureConnected();
 			}
-		}
+		}, 0);
 	}
 
 	private doConnect(): void {
-		if (typeof WebSocket === "undefined") {
-			console.warn(
-				"[lazypock] WebSocket not available — realtime subscriptions disabled",
-			);
-			return;
-		}
+		if (this.closed) return;
+		const topics = this.serverTopics();
+		if (topics.length === 0 || !this.url) return;
 
-		let url = this.url;
+		// Drop any in-flight attempt: its `finally` sees a nulled controller and
+		// does not schedule a reconnect of its own.
+		this.closeStream();
+
+		const params = new URLSearchParams();
+		params.set("subscribe", topics.join(","));
+		const url = this.url + (this.url.includes("?") ? "&" : "?") + params.toString();
+
 		const token = this.tokenProvider ? this.tokenProvider() : this.token;
-		if (token) {
-			url +=
-				(url.includes("?") ? "&" : "?") +
-				"token=" +
-				encodeURIComponent(token);
-		}
-		// Advertise the connection id on the socket (unless the caller
-		// already provided one via the URL, e.g. a custom client wrapper).
-		if (this.connectionId && !url.includes("connectionId=")) {
-			url +=
-				(url.includes("?") ? "&" : "?") +
-				"connectionId=" +
-				encodeURIComponent(this.connectionId);
-		}
+		const headers: Record<string, string> = { Accept: "text/event-stream" };
+		if (token) headers.Authorization = `Bearer ${token}`;
+		if (this.connectionId) headers["X-Connection-Id"] = this.connectionId;
 
-		this.ws = new WebSocket(url);
-
-		this.ws.onopen = () => {
-			this.reconnectAttempt = 0;
-			this.resubscribeAll();
-			this.startHeartbeat();
-		};
-
-		this.ws.onmessage = (msg: MessageEvent) => {
-			this.handleMessage(msg.data);
-		};
-
-		this.ws.onclose = () => {
-			this.stopHeartbeat();
-			this.onDisconnect?.();
-			this.scheduleReconnect();
-		};
-
-		this.ws.onerror = (err: Event) => {
-			this.onError?.(err);
-		};
+		const controller = new AbortController();
+		this.controller = controller;
+		void this.read(url, headers, controller);
 	}
 
-	private handleMessage(data: string): void {
-		let parsed: Record<string, unknown>;
+	private async read(
+		url: string,
+		headers: Record<string, string>,
+		controller: AbortController,
+	): Promise<void> {
 		try {
-			parsed = JSON.parse(data) as Record<string, unknown>;
+			const response = await fetch(url, { headers, signal: controller.signal });
+			if (!response.ok || !response.body) {
+				throw new Error(`realtime connection failed (${response.status})`);
+			}
+			this.open = true;
+			this.reconnectAttempt = 0;
+			this.onReconnect?.();
+
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = "";
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buffer = (buffer + decoder.decode(value, { stream: true })).replace(
+					/\r\n/g,
+					"\n",
+				);
+				let index: number;
+				while ((index = buffer.indexOf("\n\n")) >= 0) {
+					this.handleFrame(buffer.slice(0, index));
+					buffer = buffer.slice(index + 2);
+				}
+			}
+			throw new Error("realtime stream ended");
+		} catch (err) {
+			if (controller.signal.aborted) return;
+			this.onError?.(err);
+		} finally {
+			if (this.controller === controller) {
+				this.open = false;
+				this.controller = null;
+				this.onDisconnect?.();
+				this.scheduleReconnect();
+			}
+		}
+	}
+
+	private handleFrame(frame: string): void {
+		const dataLines: string[] = [];
+		for (const line of frame.split("\n")) {
+			if (line.startsWith("data:")) {
+				dataLines.push(line.slice(5).replace(/^ /, ""));
+			}
+		}
+		if (dataLines.length === 0) return;
+
+		let data: RealtimeFrame;
+		try {
+			data = JSON.parse(dataLines.join("\n")) as RealtimeFrame;
 		} catch {
 			return;
 		}
-		if (typeof parsed !== "object" || !parsed.topic || !parsed.event) return;
+		this.dispatch(data);
+	}
 
-		const topic = parsed.topic as string;
-		const event = parsed.event as string;
-		const payload = (parsed.payload as Record<string, unknown>) || {};
+	private dispatch(data: RealtimeFrame): void {
+		const action = typeof data.action === "string" ? data.action : "update";
+		if (data.collection === "collections") {
+			this.emit("collections", action, (data.record ?? {}) as Record<string, unknown>);
+			return;
+		}
+		if (!data.collection) return;
+		const payload: Record<string, unknown> = { record: data.record ?? {}, action };
+		this.emit(`collection:${data.collection}`, action, payload);
+		if (data.id) {
+			this.emit(`collection:${data.collection}:${data.id}`, action, payload);
+		}
+	}
 
-		// Handle phx_reply (join/heartbeat responses)
-		if (event === "phx_reply") return;
-
-		// Relay incoming events to all subscribers of this topic
+	private emit(topic: string, event: string, payload: Record<string, unknown>): void {
 		const subs = this.subscriptions.get(topic);
-		if (subs) {
-			const e: RealtimeEvent = {
-				event,
-				topic,
-				payload: payload as Record<string, unknown>,
-			};
-			for (const s of subs) {
-				try {
-					s.callback(e);
-				} catch {
-					// swallow callback errors
-				}
+		if (!subs) return;
+		const e: RealtimeEvent = { event, topic, payload };
+		for (const s of subs) {
+			try {
+				s.callback(e);
+			} catch {
+				// swallow callback errors
 			}
 		}
 	}
 
-	private joinTopic(
-		topic: string,
-		joinPayload?: Record<string, unknown>,
-	): void {
-		const ref = this.nextRef();
-		// Phoenix V1 JSON Serializer expects a JSON object, not an array
-		const msg = JSON.stringify({
-			topic: topic,
-			event: "phx_join",
-			payload: joinPayload ?? {},
-			ref: ref,
-		});
-		this.ws?.send(msg);
+	private closeStream(): void {
+		const controller = this.controller;
+		this.controller = null;
+		this.open = false;
+		controller?.abort();
 	}
-
-	private nextRef(): string {
-		this.refCounter++;
-		return this.refCounter.toString();
-	}
-
-	// ── Heartbeat ──
-
-	private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-
-	private startHeartbeat(): void {
-		this.stopHeartbeat();
-		this.heartbeatInterval = setInterval(() => {
-			if (this.ws?.readyState === WebSocket.OPEN) {
-				const ref = this.nextRef();
-				// Phoenix V1 JSON Serializer expects a JSON object
-				const msg = JSON.stringify({
-					topic: "phoenix",
-					event: "heartbeat",
-					payload: {},
-					ref: ref,
-				});
-				this.ws.send(msg);
-			}
-		}, 30_000);
-	}
-
-	private stopHeartbeat(): void {
-		if (this.heartbeatInterval) {
-			clearInterval(this.heartbeatInterval);
-			this.heartbeatInterval = null;
-		}
-	}
-
-	// ── Reconnect ──
 
 	private scheduleReconnect(): void {
+		if (this.closed) return;
 		this.clearReconnectTimer();
 		const delay = Math.min(
 			1000 * 2 ** this.reconnectAttempt,
@@ -381,7 +368,6 @@ export class RealtimeService {
 		this.reconnectAttempt++;
 		this.reconnectTimer = setTimeout(() => {
 			this.reconnectTimer = null;
-			this.onReconnect?.();
 			this.doConnect();
 		}, delay);
 	}
