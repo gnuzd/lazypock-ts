@@ -10,12 +10,12 @@ The main client class.
 
 ### Constructor Options
 
-| Option      | Type           | Default        | Description                                                             |
-| ----------- | -------------- | -------------- | ----------------------------------------------------------------------- |
-| `baseUrl`   | `string`       | required       | API base URL (e.g. `http://localhost:4000/api`)                         |
-| `storage`   | `StorageAdapter` | `memoryStorage` | Custom storage adapter for token persistence                            |
-| `authStore` | `AuthStore`    | auto-created   | Explicit auth store instance                                            |
-| `realtime`  | `RealtimeService` | auto-created | Real-time service for WebSocket subscriptions                           |
+| Option      | Type              | Default         | Description                                     |
+| ----------- | ----------------- | --------------- | ----------------------------------------------- |
+| `baseUrl`   | `string`          | required        | API base URL (e.g. `http://localhost:4000/api`) |
+| `storage`   | `StorageAdapter`  | `memoryStorage` | Custom storage adapter for token persistence    |
+| `authStore` | `AuthStore`       | auto-created    | Explicit auth store instance                    |
+| `realtime`  | `RealtimeService` | auto-created    | Real-time service for SSE subscriptions         |
 
 ## Collections Service (`client.collections`)
 
