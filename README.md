@@ -409,7 +409,7 @@ The main client class.
 | `baseUrl` | `string` | required | API base URL (e.g. `http://localhost:4000/api`) |
 | `storage` | `StorageAdapter` | `memoryStorage` | Custom storage adapter for token persistence (`memoryStorage` = `localStorage` with in-memory fallback) |
 | `authStore` | `AuthStore` | auto-created | Explicit auth store instance |
-| `realtime` | `RealtimeService` | auto-created | Real-time service for WebSocket subscriptions |
+| `realtime` | `RealtimeService` | auto-created | Real-time service for SSE subscriptions |
 
 #### Authentication Methods
 
@@ -451,7 +451,7 @@ PocketBase-style service for the collections themselves (admin):
 
 ### Realtime
 
-- `realtime.connect(opts)` — Connect to WebSocket
+- `realtime.connect(opts)` — Open the SSE stream (`{ url, token }`)
 - `realtime.disconnect()` — Disconnect
 - `realtime.refresh()` — Reconnect with the current auth token (auto-called on auth change)
 - `realtime.setTokenProvider(fn)` — Register a token provider consulted at every connect
@@ -672,8 +672,8 @@ client.collection('posts').subscribe('*', (event) => { ... });
 // Subscribe to a single record
 client.collection('posts').subscribe('RECORD_ID', (event) => { ... });
 
-// With options — forwarded to the server channel join payload
-// (available to onRealtimeSubscribeRequest hooks)
+// With options — accepted for PocketBase signature compatibility
+// (SSE has no join payload, so these are not sent)
 client.collection('posts').subscribe('*', (event) => { ... }, {
   expand: 'author',
   customKey: 'any extra key is forwarded',
@@ -690,24 +690,24 @@ off();
 
 The legacy callback-first form (`subscribe(cb, recordId)`) still works.
 `headers` in the options object is accepted for PocketBase signature
-compatibility but is not sent over the WebSocket.
+compatibility but is not sent — SSE has no join payload.
 
 ### Auth tokens are attached automatically
 
-The WebSocket automatically uses the current auth token (`authStore.token`)
+The stream automatically uses the current auth token (`authStore.token`)
 and **reconnects when auth changes** (login / logout / token refresh) — so
 subscriptions to rule-protected collections and admin channels work without
-any manual socket management:
+any manual stream management:
 
 ```typescript
 await client.login('admin@example.com', 'secret');
-// The socket reconnects with the new token; existing subscriptions re-join.
+// The stream reconnects with the new token; existing subscriptions re-subscribe.
 client.collection('private_feed').subscribe('*', (e) => { ... });
 ```
 
 ### Anonymous / rule-based realtime
 
-Realtime subscriptions honor your API **and list rules** — matching PocketBase behavior. This means **non-logged-in users can subscribe** to collections whose list rules are public (empty `""` string) or anon-friendly (`@request.auth.*` filters). The SDK auto-connects the WebSocket on first use, so no token is required to receive public change events:
+Realtime subscriptions honor your API **and list rules** — matching PocketBase behavior. This means **non-logged-in users can subscribe** to collections whose list rules are public (empty `""` string) or anon-friendly (`@request.auth.*` filters). The SDK opens the stream automatically on first use, so no token is required to receive public change events:
 
 ```typescript
 // Works without logging in, as long as the collection's list rule allows it
