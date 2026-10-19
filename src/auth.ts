@@ -31,13 +31,17 @@ export interface AuthModel {
 /** Callback signature for auth state changes. */
 export type AuthListener = (model: AuthModel | null, token: string) => void;
 
-// Server token TTL: 7 days (matches Phoenix.Token max_age)
+// Fallback only. The server's auth responses carry `expiresIn` (the access token's
+// real lifetime, 15 minutes on the Rust server), which is what `setSession` records.
+// The old constant assumed a 7-day Phoenix token, so a client that never used
+// `expiresIn` never refreshed in time and was signed out mid-session.
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class AuthStore {
 	private _token = "";
 	private _model: AuthModel | null = null;
 	private _tokenExpiresAt: number | null = null;
+	private _refreshToken = "";
 	private _collectionName: string | null = null;
 	private listeners = new Set<AuthListener>();
 	private storage: StorageAdapter;
@@ -57,6 +61,16 @@ export class AuthStore {
 	/** The current JWT token string, or empty string if not authenticated. */
 	get token(): string {
 		return this._token;
+	}
+
+	/**
+	 * The refresh token for the current session, or empty string.
+	 *
+	 * Kept by the store so a session can outlive the access token (15 minutes on the
+	 * server) even across a reload. Persisted under `auth_refresh_token`.
+	 */
+	get refreshToken(): string {
+		return this._refreshToken;
 	}
 
 	/** The current authenticated user record, or null. */
@@ -101,14 +115,16 @@ export class AuthStore {
 	 * Should be called once at application startup.
 	 */
 	async init(): Promise<void> {
-		const [token, model, expiresAt, collectionName] = await Promise.all([
+		const [token, model, expiresAt, collectionName, refreshToken] = await Promise.all([
 			this.storage.get("auth_token"),
 			this.storage.get("auth_model"),
 			this.storage.get("auth_expires_at"),
 			this.storage.get("auth_collection"),
+			this.storage.get("auth_refresh_token"),
 		]);
 		if (token) this._token = token;
 		if (expiresAt) this._tokenExpiresAt = parseInt(expiresAt, 10) || null;
+		if (refreshToken) this._refreshToken = refreshToken;
 		if (model) {
 			try {
 				this._model = JSON.parse(model);
@@ -128,6 +144,10 @@ export class AuthStore {
 
 	/**
 	 * Update the current auth token and model, persist to storage, and notify listeners.
+	 *
+	 * Uses the fallback TTL; prefer {@link setSession} with a server auth response,
+	 * which carries the real `expiresIn` and the refresh token.
+	 *
 	 * @param token The JWT token string.
 	 * @param model The authenticated user record, or null for superusers.
 	 */
@@ -154,18 +174,49 @@ export class AuthStore {
 	}
 
 	/**
-	 * Clear all auth state (token, model, expiry, collection) and notify listeners.
+	 * Record a complete auth response: token, model, refresh token and the access
+	 * token's real lifetime.
+	 *
+	 * `expiresIn` is seconds, the field the server's auth responses carry. Not passing
+	 * it (an older server) falls back to the historical 7-day assumption.
+	 *
+	 * @param token The JWT access token.
+	 * @param model The authenticated record, or null for a superuser.
+	 * @param options `refreshToken` and `expiresIn` from the same response.
+	 */
+	setSession(
+		token: string,
+		model: AuthModel | null,
+		options?: { refreshToken?: string; expiresIn?: number },
+	): void {
+		this.set(token, model);
+		if (options?.refreshToken) {
+			this._refreshToken = options.refreshToken;
+			void this.storage.set("auth_refresh_token", options.refreshToken);
+		}
+		const expiresIn = options?.expiresIn;
+		if (typeof expiresIn === "number" && expiresIn > 0) {
+			this._tokenExpiresAt = Date.now() + expiresIn * 1000;
+			void this.storage.set("auth_expires_at", String(this._tokenExpiresAt));
+		}
+	}
+
+	/**
+	 * Clear all auth state (token, model, expiry, refresh token, collection) and
+	 * notify listeners.
 	 */
 	clear(): void {
 		this._token = "";
 		this._model = null;
 		this._tokenExpiresAt = null;
+		this._refreshToken = "";
 		this._collectionName = null;
 		void Promise.all([
 			this.storage.remove("auth_token"),
 			this.storage.remove("auth_expires_at"),
 			this.storage.remove("auth_model"),
 			this.storage.remove("auth_collection"),
+			this.storage.remove("auth_refresh_token"),
 		]);
 		this.notify();
 	}
@@ -190,6 +241,27 @@ export class AuthStore {
 			fn(this._model, this._token);
 		}
 	}
+}
+
+/**
+ * Record a server auth response (login, setup, OAuth2 exchange, refresh) in the store.
+ *
+ * Every auth response carries `refreshToken` and `expiresIn`; keeping both is what
+ * lets a session outlive the access token. Call sites used to store only the token,
+ * so the refresh token was dropped and the local expiry was the 7-day fallback — the
+ * session was then used until the server refused it, with no way to refresh.
+ */
+export function rememberAuthResponse(
+	store: AuthStore,
+	data: Record<string, unknown> | null | undefined,
+	model: AuthModel | null,
+): void {
+	if (!data || typeof data.token !== "string" || !data.token) return;
+	store.setSession(data.token, model, {
+		refreshToken:
+			typeof data.refreshToken === "string" ? data.refreshToken : undefined,
+		expiresIn: typeof data.expiresIn === "number" ? data.expiresIn : undefined,
+	});
 }
 
 // ── Memory-only storage (default, works everywhere) ─────

@@ -490,14 +490,17 @@ Returned by `client.collection(name)`.
 
 Handles token persistence and auto-refresh.
 
-- `token` — Current JWT token
+- `token` — Current JWT access token
+- `refreshToken` — The refresh token for the session (or an empty string)
 - `model` — Current auth model (user record or null)
 - `isValid` — Whether a token exists
-- `isExpired` — Whether the current token has expired (with 30s buffer)
+- `isExpired` — Whether the access token has expired (with 30s buffer)
 - `collectionName` — Name of the auth collection used for token refresh
-- `set(token, model)` — Update token and model
+- `set(token, model)` — Update token and model, using the fallback lifetime
+- `setSession(token, model, { refreshToken, expiresIn })` — Record a server auth
+  response in full: the refresh token and the access token's real lifetime
 - `setCollectionName(name)` — Set the auth collection name for token refresh
-- `clear()` — Clear all auth state
+- `clear()` — Clear all auth state (including the refresh token)
 - `onChange(callback)` — Listen for auth changes (returns unsubscribe function)
 - `init()` — Restore persisted auth from storage
 
@@ -651,7 +654,25 @@ const client = new LazypockClient({
 
 ### Auto Token Refresh
 
-The SDK automatically refreshes expired auth tokens. When a token expires, the next API call triggers a transparent refresh via the `auth-refresh` endpoint. No manual intervention needed.
+The SDK stores the `refreshToken` and the server's `expiresIn` from every auth
+response, refreshes the access token just before it lapses, and if a request is
+refused with a 401 it refreshes once and retries. The refresh is addressed to the
+session's own collection — `_superusers` for a superuser session — and concurrent
+requests share a single refresh, so the refresh token is rotated exactly once.
+
+```ts
+// The server issues a 15-minute access token and a 30-day refresh token.
+// `setSession` is what records the lifetimes; the SDK calls it for you on
+// login / refresh / OAuth2 exchange.
+authStore.setSession(res.token, res.record, {
+  refreshToken: res.refreshToken,
+  expiresIn: res.expiresIn,
+});
+```
+
+If you build requests outside `client.http`, call `client.http.request(...)` (or
+the client methods) so the refresh wrapper runs; a raw `fetch` will not refresh
+for you.
 
 ## Real-time Subscriptions
 
