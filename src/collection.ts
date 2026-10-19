@@ -2,7 +2,7 @@
 // Typed CRUD for a single collection (like PocketBase's pb.collection(name))
 
 import type { HttpClient } from "./http";
-import type { AuthStore, AuthModel } from "./auth";
+import { rememberAuthResponse, type AuthStore, type AuthModel } from "./auth";
 import {
 	ApiError,
 	type ApiRecord,
@@ -1121,7 +1121,11 @@ export class CollectionService<
 			this.authStore.setCollectionName(this.collectionName);
 			// SAFETY: the server's auth response record is a superset of
 			// AuthModel; the auth store consumes it generically.
-			this.authStore.set(data.token, data.record as unknown as AuthModel);
+			rememberAuthResponse(
+				this.authStore,
+				data,
+				data.record as unknown as AuthModel,
+			);
 		}
 		return data;
 	}
@@ -1139,14 +1143,18 @@ export class CollectionService<
 			{ token: string; record: ApiRecord } & Record<string, unknown>
 		>(
 			this.collectionPath() + "/auth-refresh",
-			undefined,
+			{ refreshToken: this.authStore?.refreshToken },
 			options,
 		);
 		if (data && this.authStore) {
 			this.authStore.setCollectionName(this.collectionName);
 			// SAFETY: the server's auth response record is a superset of
 			// AuthModel; the auth store consumes it generically.
-			this.authStore.set(data.token, data.record as unknown as AuthModel);
+			rememberAuthResponse(
+				this.authStore,
+				data,
+				data.record as unknown as AuthModel,
+			);
 		}
 		return data;
 	}
@@ -1376,7 +1384,11 @@ export class CollectionService<
 			this.authStore.setCollectionName(this.collectionName);
 			// SAFETY: the server's auth response record is a superset of
 			// AuthModel; the auth store consumes it generically.
-			this.authStore.set(data.token, data.record as unknown as AuthModel);
+			rememberAuthResponse(
+				this.authStore,
+				data as unknown as Record<string, unknown>,
+				data.record as unknown as AuthModel,
+			);
 		}
 		// SAFETY: `data.record` is the server's auth record for this
 		// collection; it satisfies `T` at runtime — `T` is a compile-time

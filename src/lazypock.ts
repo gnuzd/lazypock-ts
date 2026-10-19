@@ -6,6 +6,7 @@ import { HttpClient } from "./http";
 import {
 	AuthStore,
 	memoryStorage,
+	rememberAuthResponse,
 	type StorageAdapter,
 	type AuthModel,
 } from "./auth";
@@ -329,7 +330,7 @@ export class LazypockClient {
 		>("/superusers/setup", { email, password });
 		if (data) {
 			this.authStore.setCollectionName(null);
-			this.authStore.set(data.token, null);
+			rememberAuthResponse(this.authStore, data, null);
 		}
 		return data;
 	}
@@ -365,7 +366,11 @@ export class LazypockClient {
 				this.authStore.setCollectionName(collection);
 				// SAFETY: the server's auth response record is a superset of
 				// AuthModel; the auth store consumes it generically.
-				this.authStore.set(data.token, data.record as unknown as AuthModel);
+				rememberAuthResponse(
+					this.authStore,
+					data,
+					data.record as unknown as AuthModel,
+				);
 			}
 		} else {
 			// Superuser login — PocketBase parity: `_superusers` is an auth collection.
@@ -387,7 +392,7 @@ export class LazypockClient {
 			}
 			if (data) {
 				this.authStore.setCollectionName(null);
-				this.authStore.set(data.token, null);
+				rememberAuthResponse(this.authStore, data, null);
 			}
 		}
 		return data;
@@ -437,7 +442,7 @@ export class LazypockClient {
 			this.authStore.setCollectionName(collection);
 			// SAFETY: the server's auth response record is a superset of
 			// AuthModel; the auth store consumes it generically.
-			this.authStore.set(data.token, data.record as unknown as AuthModel);
+			rememberAuthResponse(this.authStore, data, data.record as unknown as AuthModel);
 		}
 		return data;
 	}
@@ -459,14 +464,14 @@ export class LazypockClient {
 			{ token: string; record: ApiRecord } & Record<string, unknown>
 		>(
 			"/collections/" + encodeURIComponent(collection) + "/auth-refresh",
-			undefined,
+			{ refreshToken: this.authStore.refreshToken },
 			options,
 		);
 		if (data) {
 			this.authStore.setCollectionName(collection);
 			// SAFETY: the server's auth response record is a superset of
 			// AuthModel; the auth store consumes it generically.
-			this.authStore.set(data.token, data.record as unknown as AuthModel);
+			rememberAuthResponse(this.authStore, data, data.record as unknown as AuthModel);
 		}
 		return data;
 	}

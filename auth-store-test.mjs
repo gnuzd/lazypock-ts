@@ -86,6 +86,35 @@ function memoryStorage() {
 	check("clear nulls collectionName", store.collectionName, null);
 }
 
+// 6. The refresh token and the server's `expiresIn` are what make a session last.
+//    Storing only the token (the old behaviour) left the 7-day fallback as the only
+//    expiry, so a 15-minute access token was used for days and then refused.
+{
+	const storage = memoryStorage();
+	const store = new AuthStore(storage);
+
+	store.setSession("access-1", null, { refreshToken: "refresh-1", expiresIn: 900 });
+
+	check("setSession keeps the refresh token", store.refreshToken, "refresh-1");
+	check("setSession persists the refresh token", storage.get("auth_refresh_token"), "refresh-1");
+
+	const expiresAt = Number(storage.get("auth_expires_at"));
+	const remaining = expiresAt - Date.now();
+
+	check("setSession uses expiresIn, not the 7-day fallback", remaining > 800_000 && remaining <= 900_000, true);
+	check("a fresh access token is not expired", store.isExpired, false);
+
+	// A reload restores the refresh token, so the session can be renewed.
+	const reloaded = new AuthStore(storage);
+	await reloaded.init();
+	check("init restores the refresh token", reloaded.refreshToken, "refresh-1");
+
+	// Logging out must drop it too, or a stale refresh token outlives the session.
+	reloaded.clear();
+	check("clear removes the refresh token", storage.get("auth_refresh_token"), null);
+	check("clear empties refreshToken", reloaded.refreshToken, "");
+}
+
 console.log(
 	failures === 0 ? "\n✅ All auth-store tests passed" : `\n❌ ${failures} failures`,
 );

@@ -4,6 +4,10 @@
 import { ApiError, type Method, type RequestOptions } from "./types";
 import type { AuthModel, AuthStore } from "./auth";
 
+/** The auth collection the server serves superusers on, and the refresh path used
+ * when a session belongs to no collection (a superuser login). */
+const SUPERUSERS = "_superusers";
+
 /**
  * Low-level HTTP client wrapping `fetch` with automatic auth token injection.
  * Only relies on `globalThis.fetch` — works in browser, React Native, and Node 18+.
@@ -62,44 +66,100 @@ export class HttpClient {
 		return this._baseUrl;
 	}
 
-	private async refreshAuth(): Promise<{
+	/** A refresh already in flight, so concurrent requests rotate once, not N times. */
+	private refreshInFlight: Promise<boolean> | null = null;
+
+	/**
+	 * Exchange the stored refresh token for a new access token.
+	 *
+	 * The server's `auth-refresh` wants the **refresh** token — in the body, or as the
+	 * bearer — not the access token this used to send, which is why every refresh
+	 * attempt 401'd and cleared the session. The collection is the one the session
+	 * belongs to, or `_superusers` when the store has none (a superuser login).
+	 *
+	 * A network failure keeps the session (the next request can retry); only a refusal
+	 * by the server ends it.
+	 */
+	private async refreshAuth(): Promise<{ token: string; record: Record<string, unknown> } | null> {
+		const refreshToken = this.authStore.refreshToken;
+		if (!refreshToken) return null;
+		if (this.refreshInFlight) {
+			const refreshed = await this.refreshInFlight;
+			return refreshed ? this.currentAuthResponse() : null;
+		}
+
+		this.refreshInFlight = this.performRefresh(refreshToken);
+		try {
+			const refreshed = await this.refreshInFlight;
+			return refreshed ? this.currentAuthResponse() : null;
+		} finally {
+			this.refreshInFlight = null;
+		}
+	}
+
+	/** The store's current session, in the shape the old refresh returned. */
+	private currentAuthResponse(): {
 		token: string;
 		record: Record<string, unknown>;
-	} | null> {
-		const collection = this.authStore.collectionName;
-		if (!collection) return null;
+	} {
+		return {
+			token: this.authStore.token,
+			record: (this.authStore.model ?? {}) as unknown as Record<string, unknown>,
+		};
+	}
+
+	private async performRefresh(refreshToken: string): Promise<boolean> {
+		const collection = this.refreshCollection();
 		try {
-			const url =
+			const res = await this.defaultFetch(
 				this.baseUrl +
-				"/collections/" +
-				encodeURIComponent(collection) +
-				"/auth-refresh";
-			const headers: Record<string, string> = {
-				"Content-Type": "application/json",
-			};
-			if (this.authStore.token) {
-				headers["Authorization"] = "Bearer " + this.authStore.token;
-			}
-			const res = await this.defaultFetch(url, {
-				method: "POST",
-				headers,
-			});
+					"/collections/" +
+					encodeURIComponent(collection) +
+					"/auth-refresh",
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ refreshToken }),
+				},
+			);
 			if (!res.ok) {
-				this.authStore.clear();
-				return null;
+				// Revoked, expired, replayed or from another collection: there is no
+				// session left to keep.
+				if (res.status === 400 || res.status === 401) {
+					this.authStore.clear();
+				}
+				return false;
 			}
 			const data = (await res.json()) as Record<string, unknown>;
-			if (data && typeof data.token === "string") {
-				const record = data["record"];
-				const model: AuthModel | null =
-					record && typeof record === "object" ? (record as AuthModel) : null;
-				this.authStore.set(data.token, model);
-				return data as { token: string; record: Record<string, unknown> };
+			if (!data || typeof data.token !== "string") {
+				this.authStore.clear();
+				return false;
 			}
-			return null;
+			const record = data["record"];
+			const model: AuthModel | null =
+				record && typeof record === "object" ? (record as AuthModel) : null;
+			this.authStore.setCollectionName(
+				collection === SUPERUSERS ? null : collection,
+			);
+			this.authStore.setSession(data.token, model, {
+				refreshToken:
+					typeof data.refreshToken === "string" ? data.refreshToken : undefined,
+				expiresIn: typeof data.expiresIn === "number" ? data.expiresIn : undefined,
+			});
+			return true;
 		} catch {
-			return null;
+			return false;
 		}
+	}
+
+	/** The auth collection a refresh is addressed to, including superusers. */
+	private refreshCollection(): string {
+		if (this.authStore.collectionName) return this.authStore.collectionName;
+		const model = this.authStore.model as { collectionName?: unknown } | null;
+		if (model && typeof model.collectionName === "string" && model.collectionName) {
+			return model.collectionName;
+		}
+		return SUPERUSERS;
 	}
 
 	/**
@@ -155,8 +215,10 @@ export class HttpClient {
 		body?: unknown,
 		options?: RequestOptions,
 	): Promise<T | null> {
-		// Auto-refresh if token is expired
-		if (this.authStore.isExpired && this.authStore.collectionName) {
+		// Refresh just before the access token lapses. A superuser session has no
+		// collection name, so guarding on it (as this used to) skipped every superuser
+		// refresh and signed the Studio out at the 15-minute mark.
+		if (this.authStore.isExpired && this.authStore.refreshToken) {
 			await this.refreshAuth();
 		}
 
@@ -292,8 +354,9 @@ export class HttpClient {
 
 		let res: Response | null = null;
 		const fetcher = options?.fetch ?? this.defaultFetch;
+		const send = async (): Promise<Response> => fetcher(url, init);
 		try {
-			res = await fetcher(url, init);
+			res = await send();
 		} catch (err) {
 			// Aborted (auto-cancelled duplicate, manual cancel, or external signal)
 			// → normalized ApiError with isAbort === true, like PocketBase.
@@ -314,6 +377,32 @@ export class HttpClient {
 				this.cancelControllers[requestKey] === controller
 			) {
 				delete this.cancelControllers[requestKey];
+			}
+		}
+
+		// A refused token does not always mean a dead session: it can be a stale access
+		// token the recorded expiry did not predict (clock skew, a reloaded tab, a
+		// revocation elsewhere). Refresh once and retry — after that, the 401 is the
+		// answer.
+		if (res!.status === 401 && this.authStore.refreshToken) {
+			// Release the refused response before reusing the connection.
+			await res!.text().catch(() => {});
+			const refreshed = await this.refreshAuth();
+			if (refreshed) {
+				headers["Authorization"] = "Bearer " + this.authStore.token;
+				try {
+					res = await send();
+				} catch (err) {
+					if (isAbortError(err)) {
+						throw new ApiError(
+							"The request was aborted (most likely auto-cancelled by a newer request with the same requestKey)",
+							{},
+							0,
+							true,
+						);
+					}
+					throw err;
+				}
 			}
 		}
 
