@@ -25,6 +25,14 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.19.1](https://github.com/gnuzd/lazypock-ts/compare/v0.19.0...v0.19.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **auth:** keep a session alive with the refresh token ([07152ec](https://github.com/gnuzd/lazypock-ts/commit/07152ec61a1aa3e049e844349a4ee000d99e419a))
+* **auth:** keep a session alive with the refresh token ([f615d5d](https://github.com/gnuzd/lazypock-ts/commit/f615d5de9e6c8ad45bf2e697ce517cead4d1db26))
+
 ## [0.19.0](https://github.com/gnuzd/lazypock-ts/compare/v0.18.0...v0.19.0) (2026-10-15)
 
 
