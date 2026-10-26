@@ -25,6 +25,14 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.19.2](https://github.com/gnuzd/lazypock-ts/compare/v0.19.1...v0.19.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **sdk:** cap getFullList batch at the server's 500 perPage maximum ([13a5f53](https://github.com/gnuzd/lazypock-ts/commit/13a5f53bcb417a3912d24b20d13c715971620a8e))
+* **sdk:** cap getFullList batch at the server's 500 perPage maximum ([49631ba](https://github.com/gnuzd/lazypock-ts/commit/49631baed976721f56e086a6a7daef9b987aab6f))
+
 ## [0.19.1](https://github.com/gnuzd/lazypock-ts/compare/v0.19.0...v0.19.1) (2026-10-19)
 
 
