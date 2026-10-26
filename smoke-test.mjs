@@ -739,7 +739,7 @@ await (async () => {
 				JSON.stringify({
 					items: [{ id: "1" }, { id: "2" }],
 					page: 1,
-					perPage: 1000,
+					perPage: 500,
 					totalItems: 2,
 					totalPages: 1,
 				}),
@@ -749,7 +749,7 @@ await (async () => {
 	const c = new LazypockClient({ baseUrl: "http://x/api" });
 
 	// concurrent identical calls → 1 request, both resolve
-	const url = "http://x/api/collections/posts/records?page=1&perPage=1000";
+	const url = "http://x/api/collections/posts/records?page=1&perPage=500";
 	const [a, b] = await Promise.allSettled([
 		c.collection("posts").getFullList({ fetch: fetchMock }),
 		c.collection("posts").getFullList({ fetch: fetchMock }),
@@ -758,6 +758,18 @@ await (async () => {
 	check("getFullList dedup: first resolves", a.status, "fulfilled");
 	check("getFullList dedup: second resolves", b.status, "fulfilled");
 	check("getFullList dedup: same data", a.value?.length, 2);
+
+	// `batch` is capped at the server's perPage maximum (500); a larger value would 400
+	const capped = [];
+	const cappedFetch = async (u) => {
+		capped.push(String(u));
+		return fetchMock(u);
+	};
+	await c
+		.collection("posts")
+		.getFullList({ fetch: cappedFetch, batch: 5000, requestKey: "cap" })
+		.catch(() => {});
+	check("getFullList clamps batch to 500", capped[0]?.includes("perPage=500"), true);
 
 	// different options → still distinct requests
 	const c2 = new LazypockClient({ baseUrl: "http://x/api" });
@@ -798,7 +810,7 @@ await (async () => {
 				JSON.stringify({
 					items,
 					page,
-					perPage: 1000,
+					perPage: 500,
 					totalItems: 4,
 					totalPages: 2,
 				}),

@@ -12,7 +12,7 @@
 
 import type { HttpClient } from "./http";
 import type { RealtimeService } from "./realtime";
-import { stableStringify } from "./collection";
+import { clampBatch, MAX_PER_PAGE, stableStringify } from "./collection";
 import type { ListResult, RequestOptions, ApiRecord } from "./types";
 
 const REGISTRY_TOPIC = "collections";
@@ -74,7 +74,8 @@ export class CollectionsService {
 		options?: Record<string, unknown> & RequestOptions,
 	): Promise<Array<T>> {
 		if (!this.http) return [];
-		const { batch = 1000, ...rest } = options ?? {};
+		const { batch: requestedBatch = MAX_PER_PAGE, ...rest } = options ?? {};
+		const batch = clampBatch(requestedBatch as number);
 
 		// Extract request-transport options so they never leak into query params.
 		const {
