@@ -48,6 +48,19 @@ type StableRequestValue =
  * Strips request-transport keys (`requestKey`, `singleFlight`, `fetch`,
  * `signal`) so functionally-identical calls share one key.
  */
+/**
+ * Largest `perPage` the server accepts (`MAX_PER_PAGE` in lazypock's pagination).
+ * `getFullList()` pages at this size by default and never asks for more: a larger
+ * `perPage` is rejected with a 400 rather than clamped.
+ */
+export const MAX_PER_PAGE = 500;
+
+/** Keep a requested page size within what the server accepts (1..MAX_PER_PAGE). */
+export function clampBatch(batch: number): number {
+	if (!Number.isFinite(batch)) return MAX_PER_PAGE;
+	return Math.min(Math.max(1, Math.floor(batch)), MAX_PER_PAGE);
+}
+
 export function stableStringify(value: unknown): string {
 	const seen = new Set<object>();
 	const sort = (v: unknown): StableRequestValue => {
@@ -771,7 +784,7 @@ export class CollectionService<
 	}
 
 	/**
-	 * Fetch all records at once (auto-paginates). Mirrors PocketBase's
+	 * Fetch all records at once (auto-paginates; `batch` defaults to and is capped at 500, the server max `perPage`). Mirrors PocketBase's
 	 * `pb.collection(name).getFullList()`.
 	 *
 	 * @param options Query params (`sort`, `filter`, `batch`, etc.) + request options.
@@ -784,7 +797,8 @@ export class CollectionService<
 	>(
 		options?: ListOptions<TFields, E, S, F> & RequestOptions,
 	): Promise<Array<T2 & { expand?: ExpandObj<E, TExpand> }>> {
-		const { batch = 1000, ...rest } = options ?? {};
+		const { batch: requestedBatch = MAX_PER_PAGE, ...rest } = options ?? {};
+		const batch = clampBatch(requestedBatch as number);
 
 		// Resolve a `filter` callback before computing the dedup key so the key
 		// reflects the actual filter expression (a function is not serializable).
