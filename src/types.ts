@@ -56,7 +56,7 @@ export interface ListResult<T = ApiRecord> {
 }
 
 /** HTTP method supported by the client. */
-export type Method = "GET" | "POST" | "PATCH" | "DELETE";
+export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface RequestOptions {
 	/** Search/filter params */

@@ -449,6 +449,23 @@ PocketBase-style service for the collections themselves (admin):
 - `getThumbUrl(baseUrl, fileId, size)` — Construct a thumbnail URL for a pre-configured thumb size
 - `getScaleUrl(baseUrl, fileId, size)` — Construct an on-demand scaled image URL (e.g. `100x100`, `400x`)
 
+### Mail (`client.mail`)
+
+Send email through the deployment's SMTP settings, and manage its templates. Sending **queues** a
+job (it does not deliver inline); failures surface on the job in `GET /api/logs`.
+
+- `mail.send({ to, template, assigns? }, options?)` — Queue a message from a template (API-keyable)
+- `mail.send({ to, subject, html?, text? }, options?)` — Queue a raw message (API-keyable)
+- `mail.listTemplates(options?)` — Every template, with resolved bodies and the layer each part came from (superuser)
+- `mail.getTemplate(name, options?)` — One template (superuser)
+- `mail.saveTemplate(name, { subject, html, text }, options?)` — Replace all three parts; parsed before it is stored (superuser)
+- `mail.deleteTemplate(name, options?)` — Remove the stored parts, falling back to the file or the built-in (superuser)
+- `mail.preview(name, { assigns?, toName?, subject?, html?, text? }, options?)` — Render without storing or sending (superuser)
+
+Defining a template is deliberately **not** API-keyable: a template is rendered with the variables of
+an auth email — a verification or password-reset token — so whoever can write one can mail
+themselves somebody else's token.
+
 ### Realtime
 
 - `realtime.connect(opts)` — Open the SSE stream (`{ url, token }`)

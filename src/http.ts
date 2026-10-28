@@ -470,6 +470,22 @@ export class HttpClient {
 	}
 
 	/**
+	 * HTTP PUT — a full replacement. Used where the server models a resource as a
+	 * complete unit rather than a set of patches (e.g. a mail template, which only
+	 * exists once all three of its parts do).
+	 * @param path URL path.
+	 * @param body Request body.
+	 * @param options Optional request options.
+	 */
+	put<T = unknown>(
+		path: string,
+		body?: unknown,
+		options?: RequestOptions,
+	): Promise<T | null> {
+		return this.request<T>("PUT", path, body, options);
+	}
+
+	/**
 	 * HTTP PATCH.
 	 * @param path URL path.
 	 * @param body Optional request body.
