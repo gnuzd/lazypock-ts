@@ -3,7 +3,7 @@
 //
 //   const q = posts.where;
 //   const expr = q("title").contains("x").and(q("published").eq(true));
-//   // → (title ~ '%x%' && published = true)
+//   // → (title ~ 'x' && published = true)
 //   await posts.getList(1, 20, { filter: expr });
 //
 // Field names and operators are checked at compile time (and suggested by
@@ -187,7 +187,7 @@ export class FilterBuilder<F extends string> {
 		return this.cmp("?<=", value);
 	}
 
-private cmp(op: string, value: FilterScalar): FilterExpr {
+	private cmp(op: string, value: FilterScalar): FilterExpr {
 		return new FilterExpr(`${this.field} ${op} ${literal(value)}`);
 	}
 }
