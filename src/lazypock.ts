@@ -43,6 +43,19 @@ import {
 	type DirectUpload,
 } from "./files";
 import { CollectionsService } from "./collections";
+import {
+	MailService,
+	type MailTemplate,
+	type MailTemplateParts,
+	type MailMessage,
+	type MailSendResult,
+	type MailPreviewDraft,
+	type MailPreviewResult,
+	type MailTemplateDeleteResult,
+	type MailTemplateLayer,
+	type MailPart,
+	type MailAssigns,
+} from "./mail";
 import type { CollectionSchema, SchemaField } from "./schema";
 import { generateTypes, collectionTypeName } from "./codegen";
 import { fieldTypeScriptType, fieldTypeKind, schemaFieldType } from "./typegen";
@@ -82,6 +95,7 @@ export {
 	getVariantUrl,
 	CollectionService,
 	CollectionsService,
+	MailService,
 	generateTypes,
 	collectionTypeName,
 	fieldTypeScriptType,
@@ -102,6 +116,17 @@ export type {
 	// realtime
 	RealtimeConnectOpts,
 	RealtimeTokenProvider,
+	// mail
+	MailTemplate,
+	MailTemplateParts,
+	MailMessage,
+	MailSendResult,
+	MailPreviewDraft,
+	MailPreviewResult,
+	MailTemplateDeleteResult,
+	MailTemplateLayer,
+	MailPart,
+	MailAssigns,
 	CollectionSchema,
 	SchemaField,
 	// schema-driven query typing
@@ -167,6 +192,7 @@ export class LazypockClient {
 	readonly realtime: RealtimeService;
 	readonly collections: CollectionsService;
 	readonly files: FilesService;
+	readonly mail: MailService;
 	private collectionCache = new Map<string, CollectionService>();
 	private schemaByName?: Map<string, CollectionSchema>;
 	private schemaById?: Map<string, CollectionSchema>;
@@ -205,6 +231,7 @@ export class LazypockClient {
 		this.authStore.onChange(() => this.realtime.refresh());
 		this.authReady.then(() => this.realtime.refresh());
 		this.files = new FilesService(this.http);
+		this.mail = new MailService(this.http);
 		this.collections = new CollectionsService(this.http, this.realtime);
 		if (options.types?.schemas) {
 			this.schemaByName = new Map(

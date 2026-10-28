@@ -13,6 +13,10 @@ import {
 	type AuthMethodsList,
 	type OAuth2Meta,
 	type ListOptions,
+	type MailSendResult,
+	type MailTemplate,
+	type MailTemplateLayer,
+	type MailPreviewResult,
 } from "./src/index";
 
 // A hand-rolled collections map (simulating codegen output)
@@ -554,5 +558,58 @@ void verifyReqOk;
 void verifiedRecord;
 void emailChangeReqOk;
 void changedRecord;
+
+// ── 10. Mail service ──
+// A message is either a template or a raw body, and the results are shaped — so
+// the type system catches a message with neither, and callers can narrow a
+// template's per-part layers without a cast.
+const queued: MailSendResult = await base.mail.send({
+	to: "ada@example.com",
+	template: "receipt",
+	assigns: { total: 42 },
+});
+const jobId: string = queued.id;
+void jobId;
+
+void base.mail.send(
+	{
+		to: "ada@example.com",
+		toName: "Ada",
+		subject: "Hello",
+		html: "<p>Hi</p>",
+	},
+	{ signal: new AbortController().signal },
+); // ✓ options are per-request, not per-message
+
+// @ts-expect-error a message needs either a template or a subject
+void base.mail.send({ to: "ada@example.com" });
+// @ts-expect-error `to` is required
+void base.mail.send({ template: "receipt" });
+// A template and a raw body together are rejected by the server (400), not by the
+// type: TypeScript's excess-property check is relaxed across union members.
+void base.mail.send({ to: "a@b.c", template: "receipt", html: "<p>x</p>" });
+
+const templates: MailTemplate[] = await base.mail.listTemplates();
+const layer: MailTemplateLayer = templates[0].source;
+const htmlLayer: MailTemplateLayer = templates[0].parts.html;
+void layer;
+void htmlLayer;
+// @ts-expect-error the three parts are fixed
+void (templates[0].parts.markdown);
+
+const saved: MailTemplate = await base.mail.saveTemplate("receipt", {
+	subject: "Receipt",
+	html: "<p>{{ total }}</p>",
+	text: "Total: {{ total }}",
+});
+void saved;
+// @ts-expect-error a save is complete or it is not a save
+void base.mail.saveTemplate("receipt", { subject: "Receipt" });
+
+const previewed: MailPreviewResult = await base.mail.preview("receipt", {
+	assigns: { total: 42 },
+	html: "<p>draft</p>",
+});
+void previewed.subject;
 
 console.log("type-test OK (compile-time checks only)");

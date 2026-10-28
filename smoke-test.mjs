@@ -1252,6 +1252,131 @@ await (async () => {
 	}
 })();
 
+// ── Mail service ──
+// The service is a thin mapping onto five endpoints, so what is worth checking
+// is the mapping: which method, which path, and which body — a template send
+// must not smuggle raw `subject`/`html`, and a preview must send only the drafts
+// the editor actually has.
+await (async () => {
+	const calls = [];
+	let reply = {};
+	const mailFetch = async (url, init) => {
+		calls.push({
+			method: init.method,
+			url,
+			body: init.body ? JSON.parse(init.body) : undefined,
+		});
+		return new Response(JSON.stringify(reply), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+	};
+	const last = () => calls[calls.length - 1];
+	const c = new LazypockClient({ baseUrl: "http://x/api" });
+
+	for (const method of [
+		"send",
+		"listTemplates",
+		"getTemplate",
+		"saveTemplate",
+		"deleteTemplate",
+		"preview",
+	]) {
+		check(`client.mail.${method} is a function`, typeof c.mail[method], "function");
+	}
+
+	// 1. A template send carries the template and its assigns, nothing raw.
+	reply = { queued: true, id: "job-1" };
+	const queued = await c.mail.send(
+		{ to: "ada@example.com", toName: "Ada", template: "receipt", assigns: { total: 42 } },
+		{ fetch: mailFetch },
+	);
+	check("send() POSTs /mail", last().method + " " + last().url, "POST http://x/api/mail");
+	check(
+		"a template send sends only the template fields",
+		JSON.stringify(last().body),
+		JSON.stringify({
+			to: "ada@example.com",
+			toName: "Ada",
+			template: "receipt",
+			assigns: { total: 42 },
+		}),
+	);
+	check("send() returns the queued job", queued.id, "job-1");
+
+	// 2. A raw send carries the subject and bodies instead.
+	await c.mail.send(
+		{ to: "ada@example.com", subject: "Hi", text: "Hello" },
+		{ fetch: mailFetch },
+	);
+	check(
+		"a raw send sends the subject and body",
+		JSON.stringify(last().body),
+		JSON.stringify({ to: "ada@example.com", subject: "Hi", text: "Hello" }),
+	);
+
+	// 3. The listing unwraps `items`.
+	reply = {
+		items: [
+			{
+				name: "receipt",
+				source: "database",
+				parts: { subject: "database", html: "file", text: "builtin" },
+				subject: "Receipt",
+				html: "<p>x</p>",
+				text: "x",
+			},
+		],
+	};
+	const templates = await c.mail.listTemplates({ fetch: mailFetch });
+	check("listTemplates() GETs /mail/templates", last().url, "http://x/api/mail/templates");
+	check("listTemplates() unwraps items", templates.length, 1);
+	check("a template reports its per-part layers", templates[0].parts.html, "file");
+
+	// 4. A name is encoded, so a slash cannot become a path segment.
+	reply = { name: "a/b", source: "builtin", parts: {}, subject: "s", html: "h", text: "t" };
+	await c.mail.getTemplate(" a/b ", { fetch: mailFetch });
+	check("getTemplate() encodes the name", last().url, "http://x/api/mail/templates/a%2Fb");
+
+	// 5. A save replaces all three parts in one PUT.
+	await c.mail.saveTemplate(
+		"receipt",
+		{ subject: "S", html: "<p>H</p>", text: "T" },
+		{ fetch: mailFetch },
+	);
+	check("saveTemplate() PUTs the template", last().method + " " + last().url, "PUT http://x/api/mail/templates/receipt");
+	check(
+		"saveTemplate() sends all three parts",
+		JSON.stringify(last().body),
+		JSON.stringify({ subject: "S", html: "<p>H</p>", text: "T" }),
+	);
+
+	// 6. A reset reports how many stored parts went away.
+	reply = { name: "receipt", deleted: 3 };
+	const reset = await c.mail.deleteTemplate("receipt", { fetch: mailFetch });
+	check("deleteTemplate() DELETEs the template", last().method + " " + last().url, "DELETE http://x/api/mail/templates/receipt");
+	check("deleteTemplate() reports the reset", reset.deleted, 3);
+
+	// 7. A preview sends the draft in place of the stored part.
+	reply = { name: "receipt", subject: "Rendered", html: "<p>R</p>", text: "R" };
+	const preview = await c.mail.preview(
+		"receipt",
+		{ html: "<p>draft</p>" },
+		{ fetch: mailFetch },
+	);
+	check(
+		"preview() POSTs the preview path",
+		last().method + " " + last().url,
+		"POST http://x/api/mail/templates/receipt/preview",
+	);
+	check(
+		"preview() sends only the drafts it has",
+		JSON.stringify(last().body),
+		JSON.stringify({ html: "<p>draft</p>" }),
+	);
+	check("preview() returns the rendered parts", preview.subject, "Rendered");
+})();
+
 console.log(
 	failures === 0 ? "\n✅ All smoke tests passed" : `\n❌ ${failures} failures`,
 );
