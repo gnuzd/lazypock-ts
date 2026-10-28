@@ -752,12 +752,17 @@ export class CollectionService<
 		if (fields !== undefined) {
 			queryParams.fields = fields;
 		}
+		// `page`/`perPage` are spread LAST so the loop's positional arguments win.
+		// With the caller's keys last, `getList(2, 30, { page: 5 })` silently
+		// requested page 5 while the caller believed it had page 2 — and
+		// `getFullList({ perPage: 1000 })` slipped a >500 `perPage` past
+		// `clampBatch`, defeating the server-max cap (a 400 on strict servers).
 		const qs = new URLSearchParams(
 			Object.fromEntries(
 				Object.entries({
+					...queryParams,
 					page: String(page),
 					perPage: String(perPage),
-					...queryParams,
 				}).map(([k, v]) => [k, String(v)]),
 			),
 		).toString();
@@ -797,7 +802,17 @@ export class CollectionService<
 	>(
 		options?: ListOptions<TFields, E, S, F> & RequestOptions,
 	): Promise<Array<T2 & { expand?: ExpandObj<E, TExpand> }>> {
-		const { batch: requestedBatch = MAX_PER_PAGE, ...rest } = options ?? {};
+		// `page`/`perPage` are owned by the pagination loop below, so they are
+		// pulled out of the per-page params: passing them through verbatim would
+		// request a fixed page on every iteration (pushing page N's rows
+		// `totalPages` times and never fetching the rest), and a raw `perPage`
+		// would bypass `clampBatch`. `batch` is the documented way to size pages.
+		const {
+			batch: requestedBatch = MAX_PER_PAGE,
+			page: _page,
+			perPage: _perPage,
+			...rest
+		} = options ?? {};
 		const batch = clampBatch(requestedBatch as number);
 
 		// Resolve a `filter` callback before computing the dedup key so the key

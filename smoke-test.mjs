@@ -1377,6 +1377,329 @@ await (async () => {
 	check("preview() returns the rendered parts", preview.subject, "Rendered");
 })();
 
+// ── P1 regression batch ────────────────────────────────
+// One focused case per fixed defect, placed together so the batch can be
+// reviewed as a unit. Each fails against the pre-fix build.
+
+import { AuthStore } from "./dist/index.js";
+
+// 1. collections.delete must await the request and surface failures.
+await (async () => {
+	const c = new LazypockClient({ baseUrl: "http://x/api" });
+	const okFetch = async () => ({ ok: true, status: 204, text: async () => "" });
+	const deleted = await c.collections.delete("abc", { fetch: okFetch });
+	check("collections.delete() returns true on success", deleted, true);
+
+	let err = null;
+	const forbidden = async () => ({
+		ok: false,
+		status: 403,
+		statusText: "Forbidden",
+		text: async () => JSON.stringify({ message: "nope" }),
+	});
+	try {
+		await c.collections.delete("abc", { fetch: forbidden, requestKey: null });
+	} catch (e) {
+		err = e;
+	}
+	check("collections.delete() rejects on failure", err instanceof ApiError, true);
+	check("collections.delete() propagates the status", err?.status, 403);
+})();
+
+// 2. getFullList owns page/perPage: caller keys must not hijack the loop.
+await (async () => {
+	const urls = [];
+	const pageFetch = async (url) => {
+		urls.push(String(url));
+		const m = String(url).match(/page=(\d+)/);
+		const page = m ? Number(m[1]) : 1;
+		return {
+			ok: true,
+			status: 200,
+			text: async () =>
+				JSON.stringify({
+					items: page === 1 ? [{ id: "1" }, { id: "2" }] : [{ id: "3" }],
+					page,
+					perPage: 500,
+					totalItems: 3,
+					totalPages: 2,
+				}),
+		};
+	};
+	const c = new LazypockClient({ baseUrl: "http://x/api" });
+
+	await c
+		.collection("cap")
+		.getFullList({ fetch: pageFetch, perPage: 1000, requestKey: "cap-bypass" });
+	check(
+		"getFullList ignores a raw perPage (cap not bypassable)",
+		urls.some((u) => u.includes("perPage=1000")),
+		false,
+	);
+	check(
+		"getFullList still pages at the 500 cap",
+		urls.every((u) => u.includes("perPage=500")),
+		true,
+	);
+
+	urls.length = 0;
+	const rows = await c
+		.collection("pg")
+		.getFullList({ fetch: pageFetch, page: 2, requestKey: "pg-bypass" });
+	check("getFullList starts at page 1", urls[0].includes("page=1"), true);
+	check(
+		"getFullList ignores a raw page (no duplicated rows)",
+		rows.map((r) => r.id).join(","),
+		"1,2,3",
+	);
+})();
+
+// 3. AuthStore.setModel refreshes the record without resetting the expiry.
+{
+	const memoryStorage = () => {
+		const map = new Map();
+		return {
+			get: (k) => (map.has(k) ? map.get(k) : null),
+			set: (k, v) => void map.set(k, v),
+			remove: (k) => void map.delete(k),
+		};
+	};
+	const store = new AuthStore(memoryStorage());
+	// A 1-second token already counts as expired under the 30s refresh buffer.
+	store.setSession("tok-1", { id: "u1" }, { refreshToken: "r1", expiresIn: 1 });
+	check("setSession records a short expiresIn", store.isExpired, true);
+
+	store.setModel({ id: "u1", name: "fresh" });
+	check("setModel keeps the recorded expiry", store.isExpired, true);
+	check("setModel keeps the token", store.token, "tok-1");
+	check("setModel keeps the refresh token", store.refreshToken, "r1");
+	check("setModel updates the model", store.model?.name, "fresh");
+
+	// Documents why me() must not route through set().
+	store.set("tok-1", { id: "u1", name: "fresh" });
+	check("set() still resets to the fallback TTL", store.isExpired, false);
+}
+
+// 4. Superuser login surfaces auth errors instead of falling back to a route
+//    the server may not have.
+await (async () => {
+	const realFetch = globalThis.fetch;
+	try {
+		const calls = [];
+		globalThis.fetch = async (url) => {
+			calls.push(String(url));
+			// The modern endpoint rejects the credentials; the legacy route does not
+			// exist on this server (404). The old fallback therefore reported "not
+			// found" instead of the real auth failure.
+			if (String(url).includes("/collections/_superusers/auth-with-password")) {
+				return {
+					ok: false,
+					status: 401,
+					statusText: "Unauthorized",
+					text: async () => JSON.stringify({ message: "Failed to authenticate." }),
+				};
+			}
+			return {
+				ok: false,
+				status: 404,
+				statusText: "Not Found",
+				text: async () => JSON.stringify({ message: "not found" }),
+			};
+		};
+		let err = null;
+		try {
+			await new LazypockClient({ baseUrl: "http://x/api" }).login("a@b.c", "wrong");
+		} catch (e) {
+			err = e;
+		}
+		check("superuser login surfaces the auth error", err?.status, 401);
+		check("superuser login keeps the server message", err?.message, "Failed to authenticate.");
+		check(
+			"superuser login does not fall back on a 401",
+			calls.filter((u) => u.includes("/superusers/login")).length,
+			0,
+		);
+
+		// An older server without the modern endpoint answers 404 → legacy route.
+		calls.length = 0;
+		globalThis.fetch = async (url) => {
+			calls.push(String(url));
+			if (String(url).includes("/collections/_superusers/auth-with-password")) {
+				return {
+					ok: false,
+					status: 404,
+					statusText: "Not Found",
+					text: async () => JSON.stringify({ message: "not found" }),
+				};
+			}
+			return {
+				ok: true,
+				status: 200,
+				text: async () => JSON.stringify({ token: "legacy-token" }),
+			};
+		};
+		const data = await new LazypockClient({ baseUrl: "http://x/api" }).login(
+			"a@b.c",
+			"pw",
+		);
+		check(
+			"superuser login falls back on a 404",
+			calls.some((u) => u.includes("/superusers/login")),
+			true,
+		);
+		check("superuser login returns the legacy token", data?.token, "legacy-token");
+	} finally {
+		globalThis.fetch = realFetch;
+	}
+})();
+
+// 5. disconnect() is not a one-way door: a later subscribe() reconnects.
+await (async () => {
+	const realFetch = globalThis.fetch;
+	try {
+		let connects = 0;
+		globalThis.fetch = async () => {
+			connects++;
+			return {
+				ok: true,
+				status: 200,
+				// A stream that never ends keeps the connection "open".
+				body: { getReader: () => ({ read: () => new Promise(() => {}) }) },
+			};
+		};
+		const tick = () => new Promise((r) => setTimeout(r, 10));
+		const rt = new RealtimeService();
+		rt.setUrl("http://x/api/realtime");
+
+		rt.subscribe("collection:posts", () => {});
+		await tick();
+		const first = connects;
+
+		rt.disconnect();
+		await tick();
+		const afterDisconnect = connects;
+
+		rt.subscribe("collection:posts", () => {});
+		await tick();
+		const afterResubscribe = connects;
+		rt.disconnect();
+
+		check("realtime opens a stream on first subscribe", first, 1);
+		check("realtime disconnect stops the stream", afterDisconnect, 1);
+		check("subscribe() after disconnect() reconnects", afterResubscribe, 2);
+	} finally {
+		globalThis.fetch = realFetch;
+	}
+})();
+
+// 6. files.uploadDirect works where global `File` does not exist (Node 18 / RN).
+// Exercised through uploadDirect, not upload(): Node's own FormData.append calls
+// `new File(...)` internally, so clearing the global breaks undici before our
+// code is reached. Both paths share `uploadFileName`, which is the guard under
+// test — a Blob carries no name, so the default must be used.
+await (async () => {
+	const RealFile = globalThis.File;
+	const realFetch = globalThis.fetch;
+	try {
+		const bodies = [];
+		globalThis.fetch = async (url, init) => {
+			bodies.push({
+				url: String(url),
+				body: init?.body ? JSON.parse(init.body) : null,
+			});
+			return {
+				ok: false,
+				status: 400,
+				statusText: "Bad Request",
+				text: async () => JSON.stringify({ message: "direct upload not configured" }),
+			};
+		};
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		globalThis.File = undefined;
+		let err = null;
+		try {
+			await c.files.uploadDirect(new Blob(["hi"]));
+		} catch (e) {
+			err = e;
+		}
+		check(
+			"files.uploadDirect survives a missing global File",
+			err instanceof ApiError,
+			true,
+		);
+		check(
+			"files.uploadDirect falls back to the default upload name",
+			bodies[0]?.body?.filename,
+			"file",
+		);
+	} finally {
+		globalThis.File = RealFile;
+		globalThis.fetch = realFetch;
+	}
+})();
+
+// 7. An injected fetch also intercepts the automatic token refresh.
+await (async () => {
+	const realFetch = globalThis.fetch;
+	try {
+		let globalCalls = 0;
+		globalThis.fetch = async () => {
+			globalCalls++;
+			throw new Error("global fetch used for the refresh");
+		};
+		const seen = [];
+		const injected = async (url) => {
+			seen.push(String(url));
+			if (String(url).includes("auth-refresh")) {
+				// performRefresh reads the refresh response with res.json().
+				const payload = {
+					token: "new",
+					refreshToken: "r2",
+					expiresIn: 900,
+					record: { id: "u1" },
+				};
+				return {
+					ok: true,
+					status: 200,
+					json: async () => payload,
+					text: async () => JSON.stringify(payload),
+				};
+			}
+			return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) };
+		};
+		const sessions = [];
+		const store = {
+			token: "old",
+			refreshToken: "r1",
+			collectionName: "users",
+			model: { id: "u1" },
+			isExpired: true,
+			set() {},
+			setSession(...args) {
+				sessions.push(args);
+			},
+			setCollectionName() {},
+			clear() {},
+		};
+		const h = new HttpClient("http://x/api", store);
+		const res = await h.request("GET", "/posts", undefined, {
+			fetch: injected,
+			requestKey: null,
+		});
+
+		check("refresh never touches the global fetch", globalCalls, 0);
+		check(
+			"refresh is issued through the injected fetch",
+			seen.some((u) => u.includes("auth-refresh")),
+			true,
+		);
+		check("refresh rotated the session", sessions.length, 1);
+		check("the original request still completes", res?.ok, true);
+	} finally {
+		globalThis.fetch = realFetch;
+	}
+})();
+
 console.log(
 	failures === 0 ? "\n✅ All smoke tests passed" : `\n❌ ${failures} failures`,
 );

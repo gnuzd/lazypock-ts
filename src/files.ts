@@ -40,6 +40,19 @@ function encodeKey(key: string): string {
 }
 
 /**
+ * Best-effort upload name for a `File | Blob`.
+ *
+ * `File` is not a global before Node 20 (it only became one in Node 20) and is
+ * absent in React Native, so it must be feature-detected: a bare
+ * `file instanceof File` throws `ReferenceError: File is not defined` there,
+ * before any request is made. `Blob` carries no name, so fall back.
+ */
+function uploadFileName(file: File | Blob, fallback = "file"): string {
+	if (typeof File !== "undefined" && file instanceof File) return file.name;
+	return fallback;
+}
+
+/**
  * Construct a file URL from the API base URL and a storage **key**.
  *
  * The key is `collection/record/filename` — for example
@@ -147,7 +160,7 @@ export class FilesService {
 		}
 
 		const formData = new FormData();
-		const name = filename || (file instanceof File ? file.name : "file");
+		const name = filename || uploadFileName(file);
 		formData.append("file", file, name);
 
 		if (meta?.collectionName)
@@ -184,7 +197,7 @@ export class FilesService {
 			signal?: AbortSignal;
 		},
 	): Promise<FileRecord | null> {
-		const filename = opts?.filename || (file instanceof File ? file.name : "file");
+		const filename = opts?.filename || uploadFileName(file);
 		const mime = file.type || "application/octet-stream";
 
 		const presigned = await this.presign({

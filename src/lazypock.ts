@@ -401,7 +401,11 @@ export class LazypockClient {
 			}
 		} else {
 			// Superuser login — PocketBase parity: `_superusers` is an auth collection.
-			// Falls back to the legacy /superusers/login for older servers.
+			// Falls back to the legacy /superusers/login ONLY when the server does not
+			// have the modern endpoint (an older build answers 404). Auth failures
+			// (wrong password, disabled account) and network errors propagate: they
+			// are not a signal to try a different route. Swallowing them here made a
+			// wrong password surface as the legacy endpoint's 404 "not found".
 			try {
 				data = await this.http.post<
 					{ token: string; record: ApiRecord } & Record<string, unknown>
@@ -409,7 +413,8 @@ export class LazypockClient {
 					identity: email,
 					password,
 				});
-			} catch {
+			} catch (err) {
+				if (!(err instanceof ApiError) || err.status !== 404) throw err;
 				data = null;
 			}
 			if (!data) {
@@ -433,10 +438,13 @@ export class LazypockClient {
 	async me<T = ApiRecord>(options?: RequestOptions): Promise<T | null> {
 		const data = await this.http.get<T>("/me", options);
 		if (data) {
-			// Update the auth model with fresh data
+			// Update the cached model only. Going through `authStore.set()` here
+			// (as this used to) also rewrote the token expiry to the 7-day
+			// fallback, so `isExpired` stayed false past the real 15-minute
+			// lifetime and the pre-flight refresh in HttpClient never fired.
 			// SAFETY: `data` is the current identity record; it satisfies
 			// AuthModel structurally.
-			this.authStore.set(this.authStore.token, data as unknown as AuthModel);
+			this.authStore.setModel(data as unknown as AuthModel);
 		}
 		return data;
 	}
