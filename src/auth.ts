@@ -174,6 +174,35 @@ export class AuthStore {
 	}
 
 	/**
+	 * Replace the cached auth model **without** touching the token, its recorded
+	 * expiry, or the refresh token.
+	 *
+	 * Use this when a read refreshes the identity record (e.g. `me()`, or the
+	 * server echoing the record back). Routing that through {@link set} would
+	 * overwrite the access token's real `expiresIn` with the 7-day fallback TTL,
+	 * so `isExpired` stays false long past the real 15-minute lifetime and the
+	 * proactive refresh never fires — every request then pays a 401 + retry.
+	 *
+	 * @param model The authenticated user record, or null for superusers.
+	 */
+	setModel(model: AuthModel | null): void {
+		this._model = model;
+
+		// Mirrors `set`: derive the auth collection when the caller has not set it.
+		if (!this._collectionName && model && typeof model.collectionName === "string") {
+			this._collectionName = model.collectionName;
+		}
+
+		void Promise.all([
+			model
+				? this.storage.set("auth_model", JSON.stringify(model))
+				: this.storage.remove("auth_model"),
+			this.persistCollectionName(),
+		]);
+		this.notify();
+	}
+
+	/**
 	 * Record a complete auth response: token, model, refresh token and the access
 	 * token's real lifetime.
 	 *

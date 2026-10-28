@@ -79,8 +79,15 @@ export class HttpClient {
 	 *
 	 * A network failure keeps the session (the next request can retry); only a refusal
 	 * by the server ends it.
+	 *
+	 * `fetcher` is the per-request `options.fetch` override, so a caller (or a test)
+	 * that injected its own transport also intercepts the refresh. Falling back to
+	 * the global fetch here meant those callers — React Native and the test suite —
+	 * silently did not cover this path at all.
 	 */
-	private async refreshAuth(): Promise<{ token: string; record: Record<string, unknown> } | null> {
+	private async refreshAuth(
+		fetcher?: typeof globalThis.fetch,
+	): Promise<{ token: string; record: Record<string, unknown> } | null> {
 		const refreshToken = this.authStore.refreshToken;
 		if (!refreshToken) return null;
 		if (this.refreshInFlight) {
@@ -88,7 +95,7 @@ export class HttpClient {
 			return refreshed ? this.currentAuthResponse() : null;
 		}
 
-		this.refreshInFlight = this.performRefresh(refreshToken);
+		this.refreshInFlight = this.performRefresh(refreshToken, fetcher);
 		try {
 			const refreshed = await this.refreshInFlight;
 			return refreshed ? this.currentAuthResponse() : null;
@@ -104,14 +111,22 @@ export class HttpClient {
 	} {
 		return {
 			token: this.authStore.token,
+			// SAFETY: `AuthModel` is an index-signature interface (`[key: string]:
+			// unknown`), so its values are readable as a plain property bag; the
+			// `{}` fallback preserves the "no model, empty record" contract of the
+			// response shape this mirrors. The cast only bridges the empty-object
+			// literal, which TypeScript gives no index signature.
 			record: (this.authStore.model ?? {}) as unknown as Record<string, unknown>,
 		};
 	}
 
-	private async performRefresh(refreshToken: string): Promise<boolean> {
+	private async performRefresh(
+		refreshToken: string,
+		fetcher?: typeof globalThis.fetch,
+	): Promise<boolean> {
 		const collection = this.refreshCollection();
 		try {
-			const res = await this.defaultFetch(
+			const res = await (fetcher ?? this.defaultFetch)(
 				this.baseUrl +
 					"/collections/" +
 					encodeURIComponent(collection) +
@@ -219,7 +234,7 @@ export class HttpClient {
 		// collection name, so guarding on it (as this used to) skipped every superuser
 		// refresh and signed the Studio out at the 15-minute mark.
 		if (this.authStore.isExpired && this.authStore.refreshToken) {
-			await this.refreshAuth();
+			await this.refreshAuth(options?.fetch);
 		}
 
 		// Resolve the auto-cancellation key (PocketBase `requestKey` semantics):
@@ -387,7 +402,7 @@ export class HttpClient {
 		if (res!.status === 401 && this.authStore.refreshToken) {
 			// Release the refused response before reusing the connection.
 			await res!.text().catch(() => {});
-			const refreshed = await this.refreshAuth();
+			const refreshed = await this.refreshAuth(options?.fetch);
 			if (refreshed) {
 				headers["Authorization"] = "Bearer " + this.authStore.token;
 				try {
