@@ -44,11 +44,6 @@ type StableRequestValue =
 	| { [key: string]: StableRequestValue };
 
 /**
- * Deterministic JSON stringify for building a stable cache/dedup key.
- * Strips request-transport keys (`requestKey`, `singleFlight`, `fetch`,
- * `signal`) so functionally-identical calls share one key.
- */
-/**
  * Largest `perPage` the server accepts (`MAX_PER_PAGE` in lazypock's pagination).
  * `getFullList()` pages at this size by default and never asks for more: a larger
  * `perPage` is rejected with a 400 rather than clamped.
@@ -61,20 +56,37 @@ export function clampBatch(batch: number): number {
 	return Math.min(Math.max(1, Math.floor(batch)), MAX_PER_PAGE);
 }
 
+/**
+ * Request-transport options. They don't change what the server returns, so
+ * they are excluded from the dedup key — but only at the top level: a record
+ * field that happens to be called `signal` is payload, not transport.
+ */
+const TRANSPORT_KEYS = new Set(["requestKey", "singleFlight", "fetch", "signal"]);
+
+/**
+ * Deterministic JSON stringify for building a stable cache/dedup key.
+ * Object keys are sorted (so key order never changes the key) and the
+ * top-level transport options are stripped.
+ *
+ * Cycles are reported as `"[Circular]"`; the visited set is a *path* stack so a
+ * value referenced twice in a non-cyclic graph keeps its real content. Treating
+ * a shared reference as a cycle collapses structurally different option bags
+ * onto one key, and single-flight then hands a caller the wrong response.
+ */
 export function stableStringify(value: unknown): string {
-	const seen = new Set<object>();
-	const sort = (v: unknown): StableRequestValue => {
-		if (Array.isArray(v)) return v.map(sort);
+	const path = new Set<object>();
+	const sort = (v: unknown, topLevel: boolean): StableRequestValue => {
+		if (Array.isArray(v)) return v.map((el) => sort(el, false));
 		if (v && typeof v === "object") {
-			if (seen.has(v as object)) return "[Circular]";
-			seen.add(v as object);
+			const obj = v as Record<string, unknown>;
+			if (path.has(obj)) return "[Circular]";
+			path.add(obj);
 			const out: Record<string, StableRequestValue> = {};
-			for (const k of Object.keys(v as object).sort()) {
-				if (k === "requestKey" || k === "singleFlight" || k === "fetch" || k === "signal") {
-					continue;
-				}
-				out[k] = sort((v as Record<string, unknown>)[k]);
+			for (const k of Object.keys(obj).sort()) {
+				if (topLevel && TRANSPORT_KEYS.has(k)) continue;
+				out[k] = sort(obj[k], false);
 			}
+			path.delete(obj);
 			return out;
 		}
 		// SAFETY: non-object values are JSON scalars (or undefined, which
@@ -82,7 +94,7 @@ export function stableStringify(value: unknown): string {
 		return v as StableRequestValue;
 	};
 	try {
-		return JSON.stringify(sort(value));
+		return JSON.stringify(sort(value, true));
 	} catch {
 		return String(value);
 	}
