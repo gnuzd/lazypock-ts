@@ -363,6 +363,27 @@ export class CollectionService<
 		perPage = 30,
 		options?: ListOptions<TFields, E, S, F> & RequestOptions,
 	): Promise<ListResult<T2 & { expand?: ExpandObj<E, TExpand> }> | null> {
+		return this.requestListPage<T2, E, S, F>(page, perPage, options);
+	}
+
+	/**
+	 * Normalise the caller's list params and fetch a single page of records —
+	 * the pipeline behind {@link getList}. Kept out of `getList` so the public,
+	 * type-generic signature stays next to the request work it delegates to:
+	 * array shorthands and `filter` callbacks are resolved here, `expand` +
+	 * `fields` are derived once via `prepareReadQuery`, and the response is
+	 * narrowed client-side when the server returned wider expanded records.
+	 */
+	private async requestListPage<
+		T2,
+		E extends string,
+		S extends string,
+		F extends string,
+	>(
+		page: number,
+		perPage: number,
+		options?: ListOptions<TFields, E, S, F> & RequestOptions,
+	): Promise<ListResult<T2 & { expand?: ExpandObj<E, TExpand> }> | null> {
 		const {
 			requestKey,
 			autoCancel,
