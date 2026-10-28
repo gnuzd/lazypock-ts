@@ -56,11 +56,6 @@ type StableRequestValue =
 	| { [key: string]: StableRequestValue };
 
 /**
- * Deterministic JSON stringify for building a stable cache/dedup key.
- * Strips request-transport keys (`requestKey`, `singleFlight`, `fetch`,
- * `signal`) so functionally-identical calls share one key.
- */
-/**
  * Largest `perPage` the server accepts (`MAX_PER_PAGE` in lazypock's pagination).
  * `getFullList()` pages at this size by default and never asks for more: a larger
  * `perPage` is rejected with a 400 rather than clamped.
@@ -73,6 +68,23 @@ export function clampBatch(batch: number): number {
 	return Math.min(Math.max(1, Math.floor(batch)), MAX_PER_PAGE);
 }
 
+/**
+ * Options that change how a request is delivered, never what it asks for.
+ * Two calls that differ only in these are the same request, so they are
+ * dropped before a call is hashed into a dedup key.
+ */
+const REQUEST_TRANSPORT_KEYS: ReadonlySet<string> = new Set([
+	"requestKey",
+	"singleFlight",
+	"fetch",
+	"signal",
+]);
+
+/**
+ * Deterministic JSON stringify for building a stable cache/dedup key.
+ * Strips request-transport keys (`requestKey`, `singleFlight`, `fetch`,
+ * `signal`) so functionally-identical calls share one key.
+ */
 export function stableStringify(value: unknown): string {
 	const seen = new Set<object>();
 	const sort = (v: unknown): StableRequestValue => {
@@ -82,9 +94,7 @@ export function stableStringify(value: unknown): string {
 			seen.add(v as object);
 			const out: Record<string, StableRequestValue> = {};
 			for (const k of Object.keys(v as object).sort()) {
-				if (k === "requestKey" || k === "singleFlight" || k === "fetch" || k === "signal") {
-					continue;
-				}
+				if (REQUEST_TRANSPORT_KEYS.has(k)) continue;
 				out[k] = sort((v as Record<string, unknown>)[k]);
 			}
 			return out;
@@ -137,21 +147,36 @@ interface RealtimeEventLike {
 	payload?: Record<string, unknown>;
 }
 
+/** The actions a server may report verbatim in `payload.action` (any case). */
+const EXPLICIT_ACTIONS = ["create", "update", "delete"] as const;
+type ExplicitAction = (typeof EXPLICIT_ACTIONS)[number];
+
+/**
+ * Event name → action, for events that carry no usable `payload.action`.
+ * Kept as one table so the server's spelling of an event (`create` vs
+ * `record_create`) and its action cannot be listed out of step.
+ * Unrecognised events fall back to `"update"`.
+ */
+const ACTION_BY_EVENT = new Map<string, ExplicitAction>([
+	["record_change", "update"],
+	["create", "create"],
+	["record_create", "create"],
+	["delete", "delete"],
+	["record_delete", "delete"],
+]);
+
 /** Map a raw event/action to a normalised create/update/delete action. */
 function normalizeAction(
 	event: string,
 	rawAction?: unknown,
 ): RealtimeMessage["action"] {
-	if (typeof rawAction === "string") {
-		const a = rawAction.toLowerCase();
-		if (a === "create" || a === "update" || a === "delete") {
-			return a;
-		}
-	}
-	if (event === "record_change") return "update";
-	if (event === "create" || event === "record_create") return "create";
-	if (event === "delete" || event === "record_delete") return "delete";
-	return "update";
+	// An explicit action wins, but only when it names one we know: an
+	// unrecognised value is ignored in favour of the event name.
+	const explicit =
+		typeof rawAction === "string"
+			? EXPLICIT_ACTIONS.find((a) => a === rawAction.toLowerCase())
+			: undefined;
+	return explicit ?? ACTION_BY_EVENT.get(event) ?? "update";
 }
 
 

@@ -390,6 +390,7 @@ check(
 
 // ── Realtime wiring (PocketBase-style) ──
 import { LazypockClient, RealtimeService, getScaleUrl } from "./dist/index.js";
+import { CollectionService } from "./dist/index.js";
 import { HttpClient, ApiError } from "./dist/index.js";
 
 // Stub WebSocket so subscribe() doesn't hit the network.
@@ -1261,10 +1262,19 @@ await (async () => {
 	const calls = [];
 	let reply = {};
 	const mailFetch = async (url, init) => {
+		// The SDK serialized this body, so a parse failure means the SDK sent
+		// something other than JSON — say so instead of surfacing a bare
+		// SyntaxError from inside the mock.
+		let body;
+		try {
+			body = init.body ? JSON.parse(init.body) : undefined;
+		} catch {
+			throw new Error(`mailFetch: request body is not JSON: ${init.body}`);
+		}
 		calls.push({
 			method: init.method,
 			url,
-			body: init.body ? JSON.parse(init.body) : undefined,
+			body,
 		});
 		return new Response(JSON.stringify(reply), {
 			status: 200,
@@ -1376,6 +1386,132 @@ await (async () => {
 	);
 	check("preview() returns the rendered parts", preview.subject, "Rendered");
 })();
+
+// ── stableStringify: what belongs in a dedup key ──
+// getFullList() derives its single-flight key from the caller's options via
+// stableStringify(), which drops transport-only options and sorts the rest.
+// Pinned here because it is the one thing standing between "two identical
+// calls share a request" and "two calls silently share the wrong request".
+await (async () => {
+	const okBody = JSON.stringify({
+		items: [{ id: "1" }],
+		page: 1,
+		perPage: 500,
+		totalItems: 1,
+		totalPages: 1,
+	});
+	const makeFetch = () => {
+		const calls = { count: 0 };
+		return {
+			calls,
+			fetchMock: async () => {
+				calls.count++;
+				// Stay in flight long enough for a second call to coalesce.
+				await new Promise((r) => setTimeout(r, 20));
+				return { ok: true, status: 200, text: async () => okBody };
+			},
+		};
+	};
+	const total = (...parts) => parts.reduce((n, p) => n + p.calls.count, 0);
+
+	// Transport-only options (own fetch, own signal) are stripped → one request.
+	{
+		const a = makeFetch();
+		const b = makeFetch();
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await Promise.all([
+			c.collection("posts").getFullList({
+				fetch: a.fetchMock,
+				signal: new AbortController().signal,
+			}),
+			c.collection("posts").getFullList({
+				fetch: b.fetchMock,
+				signal: new AbortController().signal,
+			}),
+		]);
+		check("dedup key drops transport options (fetch/signal)", total(a, b), 1);
+	}
+
+	// Options that change the request itself are kept → separate requests.
+	{
+		const a = makeFetch();
+		const b = makeFetch();
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await Promise.all([
+			c.collection("posts").getFullList({ fetch: a.fetchMock, headers: { "X-A": "1" } }),
+			c.collection("posts").getFullList({ fetch: b.fetchMock, headers: { "X-A": "2" } }),
+		]);
+		check("dedup key keeps request options (headers)", total(a, b), 2);
+	}
+
+	// Key order must not matter: same options, different literal order.
+	{
+		const a = makeFetch();
+		const b = makeFetch();
+		const c = new LazypockClient({ baseUrl: "http://x/api" });
+		await Promise.all([
+			c.collection("posts").getFullList({ fetch: a.fetchMock, sort: "title", expand: "author" }),
+			c.collection("posts").getFullList({ fetch: b.fetchMock, expand: "author", sort: "title" }),
+		]);
+		check("dedup key sorts option keys", total(a, b), 1);
+	}
+})();
+
+// ── realtime action normalisation (collection.subscribe) ──
+// `payload.action` wins when it names a known action; otherwise the event
+// name decides, and unknown events fall back to "update". Driven through the
+// public subscribe() path with a stubbed realtime service.
+{
+	const realtime = {
+		topic: undefined,
+		handler: undefined,
+		ensureConnected() {},
+		subscribe(topic, handler) {
+			this.topic = topic;
+			this.handler = handler;
+		},
+		unsubscribe() {},
+		unsubscribeByPrefix() {},
+	};
+	const svc = new CollectionService(undefined, "posts", undefined, realtime);
+	const actions = [];
+	svc.subscribe((e) => actions.push(e.action));
+	const emit = (event, action) =>
+		realtime.handler({
+			event,
+			topic: "collection:posts",
+			payload:
+				action === undefined
+					? { record: { id: "1" } }
+					: { record: { id: "1" }, action },
+		});
+
+	check("subscribe() joins the collection topic", realtime.topic, "collection:posts");
+
+	for (const [event, expected] of [
+		["create", "create"],
+		["record_create", "create"],
+		["record_change", "update"],
+		["delete", "delete"],
+		["record_delete", "delete"],
+		["subscription_created", "update"],
+	]) {
+		emit(event);
+		check(`event "${event}" → ${expected}`, actions[actions.length - 1], expected);
+	}
+
+	// An explicit action overrides the event, case-insensitively…
+	emit("record_delete", "CREATE");
+	check('explicit action "CREATE" wins over event', actions[actions.length - 1], "create");
+
+	// …but only when it names a known action.
+	emit("record_create", "bogus");
+	check("unknown explicit action falls back to the event", actions[actions.length - 1], "create");
+	emit("record_change", 42);
+	check("non-string explicit action falls back to the event", actions[actions.length - 1], "update");
+
+	check("every observed action is a string", actions.every((a) => typeof a === "string"), true);
+}
 
 console.log(
 	failures === 0 ? "\n✅ All smoke tests passed" : `\n❌ ${failures} failures`,
