@@ -25,6 +25,14 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.20.0](https://github.com/gnuzd/lazypock-ts/compare/v0.19.2...v0.20.0) (2026-10-28)
+
+
+### Features
+
+* **sdk:** send mail and manage the templates it renders ([5ccb13c](https://github.com/gnuzd/lazypock-ts/commit/5ccb13c74bfe973d6d1e7e9bd21046f88688deea))
+* **sdk:** send mail and manage the templates it renders ([45c21c4](https://github.com/gnuzd/lazypock-ts/commit/45c21c4bd00b3bfd3c54b6b7b2bd5f8b0497430f))
+
 ## [0.19.2](https://github.com/gnuzd/lazypock-ts/compare/v0.19.1...v0.19.2) (2026-10-26)
 
 
