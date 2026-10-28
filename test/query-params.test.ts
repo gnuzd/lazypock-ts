@@ -3,7 +3,7 @@
 // bags that are structurally different must never hash the same.
 
 import { describe, expect, test } from "bun:test";
-import { MAX_PER_PAGE, clampBatch, stableStringify } from "../src/collection";
+import { MAX_PER_PAGE, clampBatch, stableStringify } from "../src/query-params";
 
 describe("clampBatch", () => {
 	test("keeps an in-range batch", () => {
