@@ -40,7 +40,6 @@ import {
 	getScaleUrl,
 	getVariantUrl,
 	type FileRecord,
-	type DirectUpload,
 } from "./files";
 import { CollectionsService } from "./collections";
 import {
@@ -378,49 +377,34 @@ export class LazypockClient {
 		password: string,
 		collection?: string,
 	): Promise<({ token: string } & Record<string, unknown>) | null> {
-		let data;
 		if (collection) {
+			// One implementation of the auth route + session recording lives in
+			// CollectionService; don't duplicate it here.
+			return this.collection(collection).authWithPassword(email, password);
+		}
+
+		// Superuser login — PocketBase parity: `_superusers` is an auth collection.
+		// Falls back to the legacy /superusers/login for older servers.
+		let data: ({ token: string } & Record<string, unknown>) | null = null;
+		try {
 			data = await this.http.post<
-				{ token: string; record: Record<string, unknown> } & Record<
-					string,
-					unknown
-				>
-			>("/collections/" + encodeURIComponent(collection) + "/auth-with-password", {
+				{ token: string; record: ApiRecord } & Record<string, unknown>
+			>("/collections/_superusers/auth-with-password", {
 				identity: email,
 				password,
 			});
-			if (data && data.record) {
-				this.authStore.setCollectionName(collection);
-				// SAFETY: the server's auth response record is a superset of
-				// AuthModel; the auth store consumes it generically.
-				rememberAuthResponse(
-					this.authStore,
-					data,
-					data.record as unknown as AuthModel,
-				);
-			}
-		} else {
-			// Superuser login — PocketBase parity: `_superusers` is an auth collection.
-			// Falls back to the legacy /superusers/login for older servers.
-			try {
-				data = await this.http.post<
-					{ token: string; record: ApiRecord } & Record<string, unknown>
-				>("/collections/_superusers/auth-with-password", {
-					identity: email,
-					password,
-				});
-			} catch {
-				data = null;
-			}
-			if (!data) {
-				data = await this.http.post<
-					{ token: string } & Record<string, unknown>
-				>("/superusers/login", { email, password });
-			}
-			if (data) {
-				this.authStore.setCollectionName(null);
-				rememberAuthResponse(this.authStore, data, null);
-			}
+		} catch {
+			data = null;
+		}
+		if (!data) {
+			data = await this.http.post<
+				{ token: string } & Record<string, unknown>
+			>("/superusers/login", { email, password });
+		}
+		if (data) {
+			// A superuser session belongs to no collection: model null, no name.
+			this.authStore.setCollectionName(null);
+			rememberAuthResponse(this.authStore, data, null);
 		}
 		return data;
 	}
@@ -450,7 +434,7 @@ export class LazypockClient {
 	 * @param password Password.
 	 * @param options Optional request options.
 	 */
-	async authWithPassword(
+	authWithPassword(
 		collection: string,
 		identity: string,
 		password: string,
@@ -458,20 +442,7 @@ export class LazypockClient {
 	): Promise<
 		({ token: string; record: ApiRecord } & Record<string, unknown>) | null
 	> {
-		const data = await this.http.post<
-			{ token: string; record: ApiRecord } & Record<string, unknown>
-		>(
-			"/collections/" + encodeURIComponent(collection) + "/auth-with-password",
-			{ identity, password },
-			options,
-		);
-		if (data) {
-			this.authStore.setCollectionName(collection);
-			// SAFETY: the server's auth response record is a superset of
-			// AuthModel; the auth store consumes it generically.
-			rememberAuthResponse(this.authStore, data, data.record as unknown as AuthModel);
-		}
-		return data;
+		return this.collection(collection).authWithPassword(identity, password, options);
 	}
 
 	/**
@@ -481,26 +452,13 @@ export class LazypockClient {
 	 * @param collection The auth collection name.
 	 * @param options Optional request options.
 	 */
-	async authRefresh(
+	authRefresh(
 		collection: string,
 		options?: RequestOptions,
 	): Promise<
 		({ token: string; record: ApiRecord } & Record<string, unknown>) | null
 	> {
-		const data = await this.http.post<
-			{ token: string; record: ApiRecord } & Record<string, unknown>
-		>(
-			"/collections/" + encodeURIComponent(collection) + "/auth-refresh",
-			{ refreshToken: this.authStore.refreshToken },
-			options,
-		);
-		if (data) {
-			this.authStore.setCollectionName(collection);
-			// SAFETY: the server's auth response record is a superset of
-			// AuthModel; the auth store consumes it generically.
-			rememberAuthResponse(this.authStore, data, data.record as unknown as AuthModel);
-		}
-		return data;
+		return this.collection(collection).authRefresh(options);
 	}
 
 	/** Clear the current auth state and remove persisted tokens. */

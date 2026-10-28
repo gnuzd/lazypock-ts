@@ -1,0 +1,41 @@
+name: CI
+
+# Runs on every pull request and on pushes to main, so a broken change is
+# caught before it reaches the release pipeline (which only builds/publishes
+# when release-please has just cut a version).
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      # Unit tests import src/*.ts directly — no build required.
+      - name: Unit tests
+        run: bun test
+
+      # Smoke tests exercise the built bundle plus the type-level suite.
+      - name: Smoke test (build + runtime + type-level)
+        run: bun run smoke
