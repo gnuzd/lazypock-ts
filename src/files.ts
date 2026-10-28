@@ -110,6 +110,22 @@ function parseUploadTarget(rawUrl: string, allowedHosts?: string[]): URL {
 }
 
 /**
+ * Ownership/processing metadata accepted by {@link FilesService.upload}.
+ *
+ * Sent as form fields alongside the bytes so the server can attribute the
+ * object to a record/field rather than leaving it unattached.
+ */
+interface UploadMeta {
+	collectionName?: string;
+	recordId?: string;
+	fieldName?: string;
+	/** `field` (default), `editor` or `library` — used by reference tracking. */
+	origin?: "field" | "editor" | "library";
+	/** Preset variants to generate before the response (e.g. ["content"]). */
+	variants?: string[];
+}
+
+/**
  * Service for file upload, retrieval, and deletion.
  * Access via {@link LazypockClient.files}.
  */
@@ -132,20 +148,29 @@ export class FilesService {
 		file: File | Blob,
 		filename?: string,
 		options?: RequestOptions,
-		meta?: {
-			collectionName?: string;
-			recordId?: string;
-			fieldName?: string;
-			/** `field` (default), `editor` or `library` — used by reference tracking. */
-			origin?: "field" | "editor" | "library";
-			/** Preset variants to generate before the response (e.g. ["content"]). */
-			variants?: string[];
-		},
+		meta?: UploadMeta,
 	): Promise<FileRecord | null> {
 		if (typeof FormData === "undefined") {
 			throw new Error("FormData is not available in this environment");
 		}
 
+		const data = await this.sendUploadForm(file, filename, meta, options);
+
+		return data as FileRecord | null;
+	}
+
+	/**
+	 * Build the multipart body for `POST /files` and send it.
+	 *
+	 * Ownership metadata travels as form fields rather than JSON, so it is
+	 * folded into the body here before the request goes out.
+	 */
+	private async sendUploadForm(
+		file: File | Blob,
+		filename?: string,
+		meta?: UploadMeta,
+		options?: RequestOptions,
+	): Promise<Record<string, unknown> | null> {
 		const formData = new FormData();
 		const name = filename || (file instanceof File ? file.name : "file");
 		formData.append("file", file, name);
@@ -164,7 +189,7 @@ export class FilesService {
 			options,
 		);
 
-		return data as FileRecord | null;
+		return data;
 	}
 
 	/**
