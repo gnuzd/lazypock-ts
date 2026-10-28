@@ -2,6 +2,21 @@
   "name": "lazypock",
   "version": "0.20.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gnuzd/lazypock-ts.git"
+  },
+  "homepage": "https://github.com/gnuzd/lazypock-ts#readme",
+  "bugs": {
+    "url": "https://github.com/gnuzd/lazypock-ts/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": [
+    "./dist/cli.js",
+    "./dist/cli.cjs"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -27,7 +42,9 @@
     "smoke": "npm run build && node smoke-test.mjs && node realtime-test.mjs && node auth-store-test.mjs && node oauth2-relay-test.mjs && tsc --noEmit --strict --target es2020 --module esnext --moduleResolution bundler type-test.ts",
     "bench": "npm run build && node bench/codegen.mjs && node bench/http-overhead.mjs",
     "test:integration": "npm run build && node integration-test.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
   },
   "bin": {
     "lazypock": "./dist/cli.js",
