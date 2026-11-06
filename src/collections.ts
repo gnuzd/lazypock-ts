@@ -12,7 +12,7 @@
 
 import type { HttpClient } from "./http";
 import type { RealtimeService } from "./realtime";
-import { clampBatch, MAX_PER_PAGE, stableStringify } from "./collection";
+import { fullListKey, paginateAll, splitListOptions } from "./paginate";
 import type { ListResult, RequestOptions, ApiRecord } from "./types";
 
 const REGISTRY_TOPIC = "collections";
@@ -74,52 +74,15 @@ export class CollectionsService {
 		options?: Record<string, unknown> & RequestOptions,
 	): Promise<Array<T>> {
 		if (!this.http) return [];
-		const { batch: requestedBatch = MAX_PER_PAGE, ...rest } = options ?? {};
-		const batch = clampBatch(requestedBatch as number);
-
-		// Extract request-transport options so they never leak into query params.
-		const {
-			requestKey: reqKey,
-			singleFlight: _singleFlight,
-			fetch: fetchFn,
-			headers: hdrs,
-			signal: sig,
-			params: passthroughParams,
-			...queryParams
-		} = rest as Record<string, unknown> & RequestOptions;
-
-		// Stable key for the whole full-list fetch — see CollectionService.getFullList
-		// for the rationale (single-flight dedup, per-page paths stay unique).
-		const effectiveKey =
-			typeof reqKey === "string"
-				? reqKey
-				: `getFullList:collections:${stableStringify(rest)}`;
-
-		const items: T[] = [];
-		let page = 1;
-		// Auto-paginate until empty (bounded by perPage and totalPages).
-		for (;;) {
-			const res = await this.getList<T>(
-				{
-					...queryParams,
-					...(passthroughParams ?? {}),
-					page,
-					perPage: batch,
-				},
-				{
-					requestKey: effectiveKey,
-					singleFlight: true,
-					...(fetchFn ? { fetch: fetchFn } : {}),
-					...(hdrs ? { headers: hdrs } : {}),
-					...(sig ? { signal: sig } : {}),
-				} as RequestOptions,
-			);
-			if (!res || !res.items || res.items.length === 0) break;
-			items.push(...(res.items as T[]));
-			if (page >= (res.totalPages ?? page)) break;
-			page += 1;
-		}
-		return items;
+		// Same split/clamp/key logic as the records service — see paginate.ts.
+		const { query, transport, batch } = splitListOptions(options);
+		const requestKey = fullListKey("collections", query, transport.requestKey);
+		return paginateAll<T>(batch, (page, perPage) =>
+			this.getList<T>(
+				{ ...query, page, perPage },
+				{ ...transport, requestKey, singleFlight: true },
+			),
+		);
 	}
 
 	/**

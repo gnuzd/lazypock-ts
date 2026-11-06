@@ -768,6 +768,25 @@ const off = client.realtime.subscribe('chat:room1', (event) => {
 off(); // or client.realtime.unsubscribe('chat:room1');
 ```
 
+## Local development
+
+```bash
+bun install
+bun run typecheck   # tsc --noEmit
+bun test            # unit tests (test/*.test.ts, run against src/, no build)
+bun run smoke       # build + runtime, realtime, auth-store, oauth2 and type-level suites
+bun run bench       # codegen + HTTP-overhead benchmarks
+```
+
+CI runs `typecheck`, `bun test` and `smoke` on every pull request and on
+pushes to `main` (`.github/workflows/ci.yml`).
+
+The source is split by concern: record CRUD lives in `src/collection/index.ts`
+(the public `CollectionService` facade), while the schema-aware query logic is
+in pure, directly testable modules — `src/expand.ts` (expand/field-selection
+normalisation), `src/projection.ts` (field projection), `src/paginate.ts`
+(full-list paging + dedup keys) and `src/collection/{auth,realtime,query}.ts`.
+
 ## Releasing (automatic)
 
 Releases are fully automatic via [release-please](https://github.com/googleapis/release-please):

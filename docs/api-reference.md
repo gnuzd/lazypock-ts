@@ -46,19 +46,26 @@ see [Queries](/sdk/typescript/queries) for the full guide.
 - `create(data, options?)` — Create record
 - `update(id, data, options?)` — Update record
 - `delete(id, options?)` — Delete record
-- `subscribe(callback, recordId?)` — Subscribe to record changes (PocketBase-style)
-- `unsubscribe(recordId?)` — Unsubscribe
+- `subscribe(cb)` / `subscribe('*', cb)` / `subscribe(recordId, cb, options?)` — Subscribe to record changes (PocketBase order; legacy `subscribe(cb, recordId)` still accepted). Returns an unsubscribe fn
+- `unsubscribe(recordId?)` — Unsubscribe `'*'`, one record id, or everything
 - `typed<T>()` — Cast this service to a record shape (compile-time only)
 - `withSchema(schema)` — Bind a schema explicitly (hidden-field exclusion + query checking)
+
+### Auth collection methods
+
 - `authWithPassword(identity, password, options?)` — Login to this auth collection
 - `authRefresh(options?)` — Refresh token for this auth collection
-- `authMethods(options?)` — Get available auth methods
+- `listAuthMethods(options?)` — Get available auth methods (`authMethods()` is the deprecated alias)
+- `authWithOAuth2(options)` / `authWithOAuth2Code(options)` — OAuth2 sign-in (popup, or code exchange)
+- `requestPasswordReset(email, options?)` / `confirmPasswordReset(token, password, passwordConfirm, options?)`
+- `requestVerification(email, options?)` / `confirmVerification(token, options?)`
+- `requestEmailChange(newEmail, options?)` / `confirmEmailChange(token, password, options?)`
 
 ### Query options
 
 | Option | Type | Description |
 | --- | --- | --- |
-| `filter` | `string \| FilterExpr` | PocketBase filter expression, or a builder expression |
+| `filter` | `string \| FilterExpr \| (where) => FilterExpr` | PocketBase filter expression, a builder expression, or a typed callback |
 | `sort` | `string \| string[]` | Field(s) to sort by; `-field` = descending |
 | `expand` | `string \| string[]` | Relation field(s) to expand (`author`, `author.name`, `author.profile`) |
 | `fields` | `string` | Explicit field projection for this call (overrides `select()`) |
