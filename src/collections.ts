@@ -179,11 +179,14 @@ export class CollectionsService {
 	 * @param options Optional request options.
 	 */
 	async delete(id: string, options?: RequestOptions): Promise<boolean> {
-		const res = this.http?.delete(
-			"/collections/" + encodeURIComponent(id),
-			options,
-		);
-		return res == null ? false : true;
+		if (!this.http) return false;
+		// Must be awaited: `delete` returns a promise, and comparing that promise
+		// to null (as this used to) is always false — the method reported success
+		// synchronously while a 403/404/network failure escaped as an unhandled
+		// rejection. Both `delete` and the API keep the same signature; failures
+		// now reject with ApiError, like create()/update().
+		await this.http.delete("/collections/" + encodeURIComponent(id), options);
+		return true;
 	}
 
 	/**

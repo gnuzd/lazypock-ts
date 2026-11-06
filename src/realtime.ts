@@ -151,6 +151,12 @@ export class RealtimeService {
 	ensureConnected(): void {
 		if (this.open || this.controller || !this.url) return;
 		if (this.serverTopics().length === 0) return;
+		// An explicit disconnect() is not a one-way door. Subscribing again is
+		// intent to reconnect (PocketBase parity). LazypockClient wires realtime
+		// via setUrl()/setTokenProvider() and never calls connect(), so nothing
+		// else ever cleared `closed`: after a disconnect every later subscribe()
+		// no-op'd inside doConnect() — no stream, no events, no diagnostics.
+		this.closed = false;
 		this.doConnect();
 	}
 
