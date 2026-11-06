@@ -42,8 +42,14 @@ export interface SplitListOptions {
 export function splitListOptions(
 	options?: (Record<string, unknown> & RequestOptions) | undefined,
 ): SplitListOptions {
+	// `page`/`perPage` are owned by the pagination loop, so they are dropped from
+	// the per-page params: passing them through verbatim would request a fixed
+	// page on every iteration (repeating page N's rows and never fetching the
+	// rest), and a raw `perPage` would bypass `clampBatch`. `batch` sizes pages.
 	const {
 		batch: requestedBatch = MAX_PER_PAGE,
+		page: _page,
+		perPage: _perPage,
 		...rest
 	} = (options ?? {}) as Record<string, unknown> & RequestOptions;
 

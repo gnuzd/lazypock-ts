@@ -76,9 +76,13 @@ export function buildListQuery(
 	const qs = new URLSearchParams(
 		Object.fromEntries(
 			Object.entries({
+				// `page`/`perPage` are spread LAST so the call's positional arguments
+				// win: with the caller's keys last, `getList(2, 30, { page: 5 })`
+				// silently requested page 5, and `getFullList({ perPage: 1000 })`
+				// slipped a >500 `perPage` past `clampBatch`.
+				...queryParams,
 				page: String(page),
 				perPage: String(perPage),
-				...queryParams,
 			}).map(([k, v]) => [k, String(v)]),
 		),
 	).toString();
