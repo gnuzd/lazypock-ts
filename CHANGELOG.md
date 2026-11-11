@@ -25,6 +25,14 @@
   treats that as a strict projection and returned empty records; the relation
   field and `expand.<key>` entries are merged into an explicit projection instead
 
+## [0.20.1](https://github.com/gnuzd/lazypock-ts/compare/v0.20.0...v0.20.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **query:** stop serialising shared references as cycles ([16297d7](https://github.com/gnuzd/lazypock-ts/commit/16297d7e4a3e8263c83746b3e36aee3b629638fe))
+* **sdk:** close seven P1 defects found in the adversarial review ([b64a977](https://github.com/gnuzd/lazypock-ts/commit/b64a977ba36d3d9130a6310ec80425b7692f3268))
+
 ## [0.20.0](https://github.com/gnuzd/lazypock-ts/compare/v0.19.2...v0.20.0) (2026-10-28)
 
 
